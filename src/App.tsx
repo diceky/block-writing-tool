@@ -2036,8 +2036,33 @@ export default function App() {
   }, []);
 
   const handleFullTextChange = useCallback((text) => {
-    setFullText(text);
-  }, []);
+  setFullText(text);
+  
+  // Sync changes back to expandedTextArray to preserve manual edits
+  if (droppedBlocks.length > 0) {
+    // Split the text by double newlines (the separator we use when joining)
+    const textParts = text.split('\n\n');
+    
+    // Update expandedTextArray with the manually edited parts
+    setExpandedTextArray(prev => {
+      const newArray = [...prev];
+      
+      // Update existing parts
+      for (let i = 0; i < Math.min(textParts.length, droppedBlocks.length); i++) {
+        newArray[i] = textParts[i];
+      }
+      
+      // If user added more text parts than blocks, keep them as additional entries
+      if (textParts.length > droppedBlocks.length) {
+        for (let i = droppedBlocks.length; i < textParts.length; i++) {
+          newArray[i] = textParts[i];
+        }
+      }
+      
+      return newArray;
+    });
+  }
+}, [droppedBlocks]);
 
   const handleAddCustomBlock = useCallback(async () => {
     if (!customText.trim()) return;
