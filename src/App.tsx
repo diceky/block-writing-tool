@@ -2205,7 +2205,7 @@ export default function App() {
         <div className="overflow-auto relative size-full p-20">
           {/* Header */}
           <div className="flex items-center justify-between mb-8">
-            <div className="font-['Chivo:Bold',_sans-serif] leading-[0] not-italic text-[#000000] text-[22px] text-left">
+            <div className="font-['Chivo:Bold',_sans-serif] not-italic text-[#000000] text-left" style={{fontSize: '32px', marginBottom: '8px'}}>
               <p className="block leading-[normal]">Let's prototype your writing</p>
             </div>
             <button
