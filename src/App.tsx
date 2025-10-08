@@ -2205,7 +2205,7 @@ export default function App() {
         <div className="overflow-auto relative size-full p-20">
           {/* Header */}
           <div className="flex items-center justify-between mb-8">
-            <div className="font-['Chivo:Bold',_sans-serif] not-italic text-[#000000] text-left" style={{fontSize: '32px', marginBottom: '8px'}}>
+            <div className="font-['Chivo:Bold',_sans-serif] not-italic text-[#000000] text-left text-[32px] mb-4">
               <p className="block leading-[normal]">Let's prototype your writing</p>
             </div>
             <button
@@ -2352,7 +2352,7 @@ export default function App() {
             </div>
           </div>
         </div>
-        <div className="absolute border border-[#a8a8a8] border-solid inset-0 pointer-events-none rounded-[20px]" />
+        {/* <div className="absolute border border-[#a8a8a8] border-solid inset-0 pointer-events-none rounded-[20px]" /> */}
       </div>
     </DndProvider>
   );
