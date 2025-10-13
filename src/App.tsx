@@ -497,7 +497,6 @@ Generate exactly 8 blocks with specific, actionable guidance for someone writing
         console.log(`Extracted ${fallbackBlocks.length} additional blocks as fallback`);
         
         // Pad to 8 if needed
-        const maxId = Math.max(...existingBlocks.map(block => block.id));
         while (fallbackBlocks.length < 8) {
           const index = fallbackBlocks.length;
           fallbackBlocks.push({
@@ -1852,35 +1851,57 @@ function DevelopTextButton({ droppedBlocks, onDevelopText, isGenerating, openaiC
 }
 
 // Developed Text Panel Component
-function DevelopedTextPanel({ fullText, onTextChange, isGenerating }) {
-  const textareaRef = useRef(null);
+function DevelopedTextPanel({ expandedTextArray, onTextChange, isGenerating }) {
 
-  // Auto-resize textarea
+  const handleItemChange = useCallback((index, newValue) => {
+    const newArray = [...expandedTextArray];
+    newArray[index] = newValue;
+    onTextChange(newArray);
+  }, [expandedTextArray, onTextChange]);
+
+  // Auto-resize textareas when content changes (including regeneration)
   useEffect(() => {
-    if (textareaRef.current && fullText) {
-      const textarea = textareaRef.current;
-      textarea.style.height = 'auto';
-      textarea.style.height = `${Math.max(textarea.scrollHeight, 400)}px`;
-    }
-  }, [fullText]);
+    // Small delay to ensure DOM is updated
+    setTimeout(() => {
+      const textareas = document.querySelectorAll('.developed-text-textarea');
+      textareas.forEach(textarea => {
+        textarea.style.height = 'auto';
+        textarea.style.height = textarea.scrollHeight + 'px';
+      });
+    }, 0);
+  }, [expandedTextArray]);
 
-  const handleTextChange = useCallback((e) => {
-    onTextChange(e.target.value);
-  }, [onTextChange]);
-
-  if (fullText) {
+  if (expandedTextArray.length > 0) {
     return (
-      <textarea
-        ref={textareaRef}
-        value={fullText}
-        onChange={handleTextChange}
-        className={`w-full p-4 border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 font-['Chivo:Regular',_sans-serif] text-[14px] leading-[1.4375] bg-[#ffffff] transition-all duration-300 ${
-          isGenerating ? 'blur-sm opacity-75' : ''
-        }`}
-        style={{ minHeight: '400px' }}
-        placeholder="Your developed text will appear here..."
-        disabled={isGenerating}
-      />
+      <div className="border border-gray-200 rounded-lg bg-white min-h-[200px]">
+        {expandedTextArray.map((item, index) => (
+          <div key={index} className="flex border-b border-gray-200 last:border-b-0">
+            {/* Number strip */}
+            <div className="w-8 bg-gray-50 border-r border-gray-200 flex items-start justify-center p-2 text-[10px] font-['Chivo:Regular',_sans-serif] text-gray-500">
+              {index + 1}
+            </div>
+
+            {/* Text content */}
+            <textarea
+              value={item}
+              onChange={(e) => handleItemChange(index, e.target.value)}
+              className={`developed-text-textarea flex-1 p-4 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 font-['Chivo:Regular',_sans-serif] text-[14px] leading-6 bg-white transition-all duration-300 overflow-hidden ${isGenerating ? 'blur-sm opacity-75' : ''}`}
+              style={{
+                minHeight: '60px',
+                height: 'auto',
+                resize: 'none'
+              }}
+              placeholder={`Expanded text for block ${index + 1}...`}
+              disabled={isGenerating}
+              onInput={(e) => {
+                // Additional resize on input for real-time adjustment
+                e.target.style.height = 'auto';
+                e.target.style.height = e.target.scrollHeight + 'px';
+              }}
+            />
+          </div>
+        ))}
+      </div>
     );
   }
 
@@ -1898,7 +1919,7 @@ function DevelopedTextPanel({ fullText, onTextChange, isGenerating }) {
 export default function App() {
   const [droppedBlocks, setDroppedBlocks] = useState([]);
   const [customText, setCustomText] = useState('');
-  const [fullText, setFullText] = useState('');
+  //const [fullText, setFullText] = useState('');
   const [expandedTextArray, setExpandedTextArray] = useState([]); // Track expanded text as array
   const [isGenerating, setIsGenerating] = useState(false);
   const [regeneratingBlocks, setRegeneratingBlocks] = useState(new Set()); // Track which blocks are being regenerated
@@ -2035,34 +2056,34 @@ export default function App() {
     setCustomText(text);
   }, []);
 
-  const handleFullTextChange = useCallback((text) => {
-  setFullText(text);
+//   const handleFullTextChange = useCallback((text) => {
+//   setFullText(text);
   
-  // Sync changes back to expandedTextArray to preserve manual edits
-  if (droppedBlocks.length > 0) {
-    // Split the text by double newlines (the separator we use when joining)
-    const textParts = text.split('\n\n');
+//   // Sync changes back to expandedTextArray to preserve manual edits
+//   if (droppedBlocks.length > 0) {
+//     // Split the text by double newlines (the separator we use when joining)
+//     const textParts = text.split('\n\n');
     
-    // Update expandedTextArray with the manually edited parts
-    setExpandedTextArray(prev => {
-      const newArray = [...prev];
+//     // Update expandedTextArray with the manually edited parts
+//     setExpandedTextArray(prev => {
+//       const newArray = [...prev];
       
-      // Update existing parts
-      for (let i = 0; i < Math.min(textParts.length, droppedBlocks.length); i++) {
-        newArray[i] = textParts[i];
-      }
+//       // Update existing parts
+//       for (let i = 0; i < Math.min(textParts.length, droppedBlocks.length); i++) {
+//         newArray[i] = textParts[i];
+//       }
       
-      // If user added more text parts than blocks, keep them as additional entries
-      if (textParts.length > droppedBlocks.length) {
-        for (let i = droppedBlocks.length; i < textParts.length; i++) {
-          newArray[i] = textParts[i];
-        }
-      }
+//       // If user added more text parts than blocks, keep them as additional entries
+//       if (textParts.length > droppedBlocks.length) {
+//         for (let i = droppedBlocks.length; i < textParts.length; i++) {
+//           newArray[i] = textParts[i];
+//         }
+//       }
       
-      return newArray;
-    });
-  }
-}, [droppedBlocks]);
+//       return newArray;
+//     });
+//   }
+// }, [droppedBlocks]);
 
   const handleAddCustomBlock = useCallback(async () => {
     if (!customText.trim()) return;
@@ -2137,7 +2158,7 @@ export default function App() {
     try {
       const expandedArray = await expandTextWithOpenAI(droppedBlocks, currentTopic);
       setExpandedTextArray(expandedArray);
-      setFullText(expandedArray.join('\n\n'));
+      //setFullText(expandedArray.join('\n\n'));
     } catch (error) {
       console.error('Error expanding text:', error);
       setError(error.message);
@@ -2145,7 +2166,7 @@ export default function App() {
       // Final fallback to original text
       const blockTexts = droppedBlocks.map(block => block.summary);
       setExpandedTextArray(blockTexts);
-      setFullText(blockTexts.join('\n\n'));
+      //setFullText(blockTexts.join('\n\n'));
       setError('OpenAI failed, showing original text: ' + error.message);
     } finally {
       setIsGenerating(false);
@@ -2194,7 +2215,7 @@ export default function App() {
         }
 
         // Update fullText with the new array
-        setFullText(newArray.join('\n\n'));
+        //setFullText(newArray.join('\n\n'));
 
         return newArray;
       });
@@ -2351,15 +2372,15 @@ export default function App() {
                 <h4 className="font-['Chivo:Bold',_sans-serif] text-[14px] text-[#000000]">
                   Developed Text
                 </h4>
-                {fullText && (
+                {expandedTextArray.length > 0 && (
                   <div className="font-['Chivo:Regular',_sans-serif] text-[12px] text-[#666666]">
-                    {fullText.trim().split(/\s+/).filter(word => word.length > 0).length} words
+                    {expandedTextArray.join('\n\n').trim().split(/\s+/).filter(word => word.length > 0).length} words
                   </div>
                 )}
               </div>
               <DevelopedTextPanel
-                fullText={fullText}
-                onTextChange={handleFullTextChange}
+                expandedTextArray={expandedTextArray}
+                onTextChange={setExpandedTextArray}
                 isGenerating={isGenerating}
               />
             </div>
