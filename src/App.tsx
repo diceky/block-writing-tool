@@ -2164,28 +2164,41 @@ export default function App() {
     }
 
     const blockToRegenerate = droppedBlocks[blockIndex];
-    
+
     // Add block to regenerating set
     setRegeneratingBlocks(prev => new Set([...prev, blockIndex]));
     setError('');
 
     try {
       const newExpansion = await regenerateSingleBlockExpansion(blockToRegenerate, currentTopic);
-      
-      // Update the specific index in the expanded text array
+
+      // Update the expanded text array
       setExpandedTextArray(prev => {
         const newArray = [...prev];
-        newArray[blockIndex] = newExpansion;
+
+        if (droppedBlocks.length > newArray.length) {
+          // We have more blocks than expanded text (new blocks were added)
+          if (blockIndex >= newArray.length) {
+            // Fill gaps and add new expansion
+            while (newArray.length < blockIndex) {
+              newArray.push('');
+            }
+            newArray[blockIndex] = newExpansion;
+          } else {
+            // Insert the new expansion and push others back
+            newArray.splice(blockIndex, 0, newExpansion);
+          }
+        } else {
+          // Same length or fewer blocks - just replace the existing content
+          newArray[blockIndex] = newExpansion;
+        }
+
+        // Update fullText with the new array
         setFullText(newArray.join('\n\n'));
+
         return newArray;
       });
 
-      // Update the concatenated full text
-      // setFullText(prev => {
-      //   const textArray = [...expandedTextArray];
-      //   textArray[blockIndex] = newExpansion;
-      //   return textArray.join('\n\n');
-      // });
     } catch (error) {
       console.error('Error regenerating block:', error);
       setError(`Failed to regenerate block: ${error.message}`);
