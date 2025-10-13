@@ -147,41 +147,6 @@ Topic: "${topic}"
 Generate exactly 8 blocks with specific, actionable guidance for someone writing about this topic. Focus on logical flow and comprehensive coverage. ENSURE the JSON array is complete and properly formatted.`;
 
   try {
-    // const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    //   method: 'POST',
-    //   headers: {
-    //     'Authorization': `Bearer ${apiKey}`,
-    //     'Content-Type': 'application/json',
-    //   },
-    //   body: JSON.stringify({
-    //     model: 'gpt-4o',
-    //     messages: [
-    //       {
-    //         role: 'user',
-    //         content: prompt
-    //       }
-    //     ],
-    //     max_tokens: 2000, // Reduced since we're generating fewer blocks
-    //     temperature: 0.7, // Reduced from 0.8 for more consistent formatting
-    //   }),
-    // });
-
-    // if (!response.ok) {
-    //   if (response.status === 401) {
-    //     throw new Error('Invalid OpenAI API key. Please check your API key and try again.');
-    //   } else if (response.status === 403) {
-    //     throw new Error('Access denied to OpenAI API. Please check your API key permissions and billing status.');
-    //   } else if (response.status === 429) {
-    //     throw new Error('OpenAI API rate limit exceeded. Please try again later.');
-    //   } else if (response.status === 500) {
-    //     throw new Error('OpenAI API server error. Please try again later.');
-    //   } else {
-    //     throw new Error(`OpenAI API error: ${response.status} ${response.statusText}`);
-    //   }
-    // }
-
-    // const data = await response.json();
-
     const response = await fetch('/.netlify/functions/chat-completions', {
       method: 'POST',
       headers: {
@@ -363,41 +328,6 @@ Topic: "${topic}"
 Generate exactly 8 blocks with specific, actionable guidance for someone writing about this topic. Focus on logical flow and comprehensive coverage. ENSURE the JSON array is complete and properly formatted.`;
 
   try {
-    // const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    //   method: 'POST',
-    //   headers: {
-    //     'Authorization': `Bearer ${apiKey}`,
-    //     'Content-Type': 'application/json',
-    //   },
-    //   body: JSON.stringify({
-    //     model: 'gpt-4o',
-    //     messages: [
-    //       {
-    //         role: 'user',
-    //         content: prompt
-    //       }
-    //     ],
-    //     max_tokens: 2000,
-    //     temperature: 0.7,
-    //   }),
-    // });
-
-    // if (!response.ok) {
-    //   if (response.status === 401) {
-    //     throw new Error('Invalid OpenAI API key. Please check your API key and try again.');
-    //   } else if (response.status === 403) {
-    //     throw new Error('Access denied to OpenAI API. Please check your API key permissions and billing status.');
-    //   } else if (response.status === 429) {
-    //     throw new Error('OpenAI API rate limit exceeded. Please try again later.');
-    //   } else if (response.status === 500) {
-    //     throw new Error('OpenAI API server error. Please try again later.');
-    //   } else {
-    //     throw new Error(`OpenAI API error: ${response.status} ${response.statusText}`);
-    //   }
-    // }
-
-    // const data = await response.json();
-
     const response = await fetch('/.netlify/functions/chat-completions', {
       method: 'POST',
       headers: {
@@ -556,41 +486,6 @@ Text content: "${text}"
 Respond with ONLY the title. No quotes, no additional text, no explanations.`;
 
   try {
-    // const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    //   method: 'POST',
-    //   headers: {
-    //     'Authorization': `Bearer ${apiKey}`,
-    //     'Content-Type': 'application/json',
-    //   },
-    //   body: JSON.stringify({
-    //     model: 'gpt-4o-mini',
-    //     messages: [
-    //       {
-    //         role: 'user',
-    //         content: prompt
-    //       }
-    //     ],
-    //     max_tokens: 20, // Keep it short for titles
-    //     temperature: 0.3, // Lower temperature for more consistent titles
-    //   }),
-    // });
-
-    // if (!response.ok) {
-    //   if (response.status === 401) {
-    //     throw new Error('Invalid OpenAI API key. Please check your API key and try again.');
-    //   } else if (response.status === 403) {
-    //     throw new Error('Access denied to OpenAI API. Please check your API key permissions and billing status.');
-    //   } else if (response.status === 429) {
-    //     throw new Error('OpenAI API rate limit exceeded. Please try again later.');
-    //   } else if (response.status === 500) {
-    //     throw new Error('OpenAI API server error. Please try again later.');
-    //   } else {
-    //     throw new Error(`OpenAI API error: ${response.status} ${response.statusText}`);
-    //   }
-    // }
-
-    // const data = await response.json();
-
     const response = await fetch('/.netlify/functions/chat-completions', {
       method: 'POST',
       headers: {
@@ -640,28 +535,6 @@ Respond with ONLY the title. No quotes, no additional text, no explanations.`;
 async function testOpenAIConnection() {
 
   try {
-    // const response = await fetch('https://api.openai.com/v1/models', {
-    //   method: 'GET',
-    //   headers: {
-    //     'Authorization': `Bearer ${apiKey}`,
-    //     'Content-Type': 'application/json',
-    //   },
-    // });
-
-    // if (!response.ok) {
-    //   if (response.status === 401) {
-    //     throw new Error('Invalid OpenAI API key');
-    //   } else if (response.status === 403) {
-    //     throw new Error('Access denied - please check API key permissions');
-    //   } else if (response.status === 429) {
-    //     throw new Error('Rate limit exceeded');
-    //   } else {
-    //     throw new Error(`Connection failed: ${response.status}`);
-    //   }
-    // }
-
-    // const data = await response.json();
-
     const response = await fetch('/.netlify/functions/models', {
       method: 'GET',
       headers: {
@@ -785,41 +658,6 @@ Instructions:
 Respond with only the expanded text, no additional commentary or formatting.`;
 
   try {
-    // const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    //   method: 'POST',
-    //   headers: {
-    //     'Authorization': `Bearer ${apiKey}`,
-    //     'Content-Type': 'application/json',
-    //   },
-    //   body: JSON.stringify({
-    //     model: 'gpt-4o-search-preview',
-    //     web_search_options: {},
-    //     messages: [
-    //       {
-    //         role: 'user',
-    //         content: prompt
-    //       }
-    //     ],
-    //     max_tokens: 2000,
-    //   }),
-    // });
-
-    // if (!response.ok) {
-    //   if (response.status === 401) {
-    //     throw new Error('Invalid OpenAI API key. Please check your API key and try again.');
-    //   } else if (response.status === 403) {
-    //     throw new Error('Access denied to OpenAI API. Please check your API key permissions and billing status.');
-    //   } else if (response.status === 429) {
-    //     throw new Error('OpenAI API rate limit exceeded. Please try again later.');
-    //   } else if (response.status === 500) {
-    //     throw new Error('OpenAI API server error. Please try again later.');
-    //   } else {
-    //     throw new Error(`OpenAI API error: ${response.status} ${response.statusText}`);
-    //   }
-    // }
-
-    // const data = await response.json();
-
     const response = await fetch('/.netlify/functions/chat-completions', {
       method: 'POST',
       headers: {
@@ -1120,123 +958,6 @@ function TopicInput({ onGenerateBlocks, isGenerating, openaiConnected }) {
     </div>
   );
 }
-
-// AI Settings Panel Component
-// function AISettingsPanel({ openaiApiKey, setOpenaiApiKey, onConnectionChange }) {
-//   const [showApiKey, setShowApiKey] = useState(false);
-//   const [isConnected, setIsConnected] = useState(false);
-//   const [isConnecting, setIsConnecting] = useState(false);
-//   const [connectionError, setConnectionError] = useState('');
-
-//   // Notify parent component when connection status changes
-//   useEffect(() => {
-//     if (onConnectionChange) {
-//       onConnectionChange(isConnected);
-//     }
-//   }, [isConnected, onConnectionChange]);
-
-//   const handleConnect = async () => {
-//     if (!openaiApiKey.trim()) {
-//       setConnectionError('Please enter your API key first');
-//       return;
-//     }
-
-//     setIsConnecting(true);
-//     setConnectionError('');
-
-//     try {
-//       await testOpenAIConnection();
-//       setIsConnected(true);
-//       setConnectionError('');
-//     } catch (error) {
-//       setConnectionError(error.message);
-//       setIsConnected(false);
-//     } finally {
-//       setIsConnecting(false);
-//     }
-//   };
-
-//   const handleDisconnect = () => {
-//     setIsConnected(false);
-//     setConnectionError('');
-//   };
-  
-//   return (
-//     <div className="bg-gray-50 rounded-lg p-4 mb-6 border border-gray-200">
-//       <h3 className="font-['Chivo:Bold',_sans-serif] text-[16px] text-[#000000] mb-3">OpenAI Connection</h3>
-      
-//       <div className="flex flex-col gap-3">
-//         <div className="flex items-center gap-4">
-//           <span className="font-['Chivo:Regular',_sans-serif] text-[14px] text-[#000000]">
-//             ChatGPT Integration
-//           </span>
-//           {isConnected && (
-//             <>
-//               <span className="bg-green-100 text-green-800 text-[10px] px-2 py-1 rounded-full font-['Chivo:Bold',_sans-serif]">
-//                 Connected
-//               </span>
-//               <button
-//                 type="button"
-//                 onClick={handleDisconnect}
-//                 className="text-blue-600 hover:text-blue-800 font-['Chivo:Regular',_sans-serif] text-[12px] underline ml-2"
-//               >
-//                 Change
-//               </button>
-//             </>
-//           )}
-//         </div>
-        
-//         {!isConnected && (
-//           <div className="flex gap-2 items-center">
-//             <div className="flex-1">
-//               <input
-//                 type={showApiKey ? "text" : "password"}
-//                 placeholder="Enter your OpenAI API key (sk-...)"
-//                 value={openaiApiKey}
-//                 onChange={(e) => setOpenaiApiKey(e.target.value)}
-//                 className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 font-['Chivo:Regular',_sans-serif] text-[14px]"
-//               />
-//             </div>
-//             <button
-//               type="button"
-//               onClick={() => setShowApiKey(!showApiKey)}
-//               className="px-3 py-2 text-gray-500 hover:text-gray-700 font-['Chivo:Regular',_sans-serif] text-[12px]"
-//             >
-//               {showApiKey ? 'Hide' : 'Show'}
-//             </button>
-//             <button
-//               type="button"
-//               onClick={handleConnect}
-//               disabled={isConnecting || !openaiApiKey.trim()}
-//               className="bg-[#1b00b6] text-white px-4 py-2 rounded hover:bg-blue-800 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed font-['Chivo:Bold',_sans-serif] text-[12px]"
-//             >
-//               {isConnecting ? 'Connecting...' : 'Connect'}
-//             </button>
-//           </div>
-//         )}
-
-//         {!isConnected && (
-//           <>
-//             {connectionError && (
-//               <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded">
-//                 <p className="font-['Chivo:Regular',_sans-serif] text-[12px]">
-//                   Connection failed: {connectionError}
-//                 </p>
-//               </div>
-//             )}
-            
-//             <div className="text-[12px] text-gray-600 font-['Chivo:Regular',_sans-serif]">
-//               <p>• Real ChatGPT integration with high-quality expansions</p>
-//               <p>• Uses GPT-4o-mini model for cost-effective, high-quality results</p>
-//               <p>• Your API key is not stored and only used for this session</p>
-//               <p>• Get your API key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">OpenAI Platform</a></p>
-//             </div>
-//           </>
-//         )}
-//       </div>
-//     </div>
-//   );
-// }
 
 function AISettingsPanel({ onConnectionChange }) {
   const [isConnected, setIsConnected] = useState(false);
@@ -2368,35 +2089,6 @@ export default function App() {
   const handleTextChange = useCallback((text) => {
     setCustomText(text);
   }, []);
-
-//   const handleFullTextChange = useCallback((text) => {
-//   setFullText(text);
-  
-//   // Sync changes back to expandedTextArray to preserve manual edits
-//   if (droppedBlocks.length > 0) {
-//     // Split the text by double newlines (the separator we use when joining)
-//     const textParts = text.split('\n\n');
-    
-//     // Update expandedTextArray with the manually edited parts
-//     setExpandedTextArray(prev => {
-//       const newArray = [...prev];
-      
-//       // Update existing parts
-//       for (let i = 0; i < Math.min(textParts.length, droppedBlocks.length); i++) {
-//         newArray[i] = textParts[i];
-//       }
-      
-//       // If user added more text parts than blocks, keep them as additional entries
-//       if (textParts.length > droppedBlocks.length) {
-//         for (let i = droppedBlocks.length; i < textParts.length; i++) {
-//           newArray[i] = textParts[i];
-//         }
-//       }
-      
-//       return newArray;
-//     });
-//   }
-// }, [droppedBlocks]);
 
   const handleAddCustomBlock = useCallback(async () => {
     if (!customText.trim()) return;
