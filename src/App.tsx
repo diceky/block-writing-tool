@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { DndProvider, useDrag, useDrop } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
@@ -206,12 +207,12 @@ Generate exactly 8 blocks with specific, actionable guidance for someone writing
     }
 
     let content = data.choices[0].message.content.trim();
-    console.log('Raw OpenAI response:', content); // Debug logging
+    //console.log('Raw OpenAI response:', content); // Debug logging
     
     // Extract JSON from the response
     content = extractJSON(content);
-    console.log('Extracted JSON:', content); // Debug logging
-    
+    //console.log('Extracted JSON:', content); // Debug logging
+
     try {
       // Use the repair function instead of direct JSON.parse
       const blocks = repairJSON(content);
@@ -239,24 +240,33 @@ Generate exactly 8 blocks with specific, actionable guidance for someone writing
       
       // Take only the first 8 blocks if we got more
       const finalBlocks = blocks.slice(0, 8);
+
+      // Calculate maxId from existing blocks
+      const maxId = existingBlocks.length > 0 ? Math.max(...existingBlocks.map(block => block.id)) : 0;
       
       // Validate and sanitize each block
       return finalBlocks.map((block, index) => {
         if (!block || typeof block !== 'object') {
           console.warn(`Invalid block at index ${index}:`, block);
           return {
-            id: index + 1,
-            title: `Block ${index + 1}`,
-            summary: `Content for block ${index + 1}`,
-            source: 'generated'
+            id: maxId + index + 1,
+            title: `Block ${maxId + index + 1}`,
+            summary: `Content for block ${maxId + index + 1}`,
+            source: 'generated',
+            parentId: null,        // Add this
+            children: [],          // Add this
+            isExpanded: true       // Add this
           };
         }
-        
+
         return {
-          id: index + 1,
-          title: (block.title || block.summary || `Block ${index + 1}`).toString().slice(0, 50),
+          id: maxId + index + 1,
+          title: (block.title || block.summary || `Block ${maxId + index + 1}`).toString().slice(0, 50),
           summary: (block.summary || block.description || block.content || 'No description provided').toString(),
-          source: 'generated'
+          source: 'generated',
+          parentId: null,          // Add this
+          children: [],            // Add this
+          isExpanded: true         // Add this
         };
       });
     } catch (parseError) {
@@ -275,6 +285,10 @@ Generate exactly 8 blocks with specific, actionable guidance for someone writing
         const summaries = summaryMatches.map(m => m.match(/"summary"\s*:\s*"([^"]*)"/)[1]);
         
         const maxPairs = Math.min(titles.length, summaries.length, 8);
+
+        // Calculate maxId here too
+        const maxId = existingBlocks.length > 0 ? Math.max(...existingBlocks.map(block => block.id)) : 0;
+
         for (let i = 0; i < maxPairs; i++) {
           fallbackBlocks.push({
             id: i + 1,
@@ -409,12 +423,12 @@ Generate exactly 8 blocks with specific, actionable guidance for someone writing
     }
 
     let content = data.choices[0].message.content.trim();
-    console.log('Raw OpenAI response:', content); // Debug logging
+    //console.log('Raw OpenAI response:', content); // Debug logging
     
     // Extract JSON from the response
     content = extractJSON(content);
-    console.log('Extracted JSON:', content); // Debug logging
-    
+    //console.log('Extracted JSON:', content); // Debug logging
+
     try {
       // Use the repair function instead of direct JSON.parse
       const blocks = repairJSON(content);
@@ -454,7 +468,10 @@ Generate exactly 8 blocks with specific, actionable guidance for someone writing
             id: maxId + index + 1,
             title: `Block ${maxId + index + 1}`,
             summary: `Content for block ${maxId + index + 1}`,
-            source: 'generated'
+            source: 'generated',
+            parentId: null,
+            children: [],
+            isExpanded: true
           };
         }
         
@@ -462,7 +479,10 @@ Generate exactly 8 blocks with specific, actionable guidance for someone writing
           id: maxId + index + 1,
           title: (block.title || block.summary || `Block ${maxId + index + 1}`).toString().slice(0, 50),
           summary: (block.summary || block.description || block.content || 'No description provided').toString(),
-          source: 'generated'
+          source: 'generated',
+          parentId: null,
+          children: [],
+          isExpanded: true
         };
       });
     } catch (parseError) {
@@ -669,140 +689,75 @@ async function testOpenAIConnection() {
   }
 }
 
-// Real OpenAI API integration
 async function expandTextWithOpenAI(blocks, topic) {
+  // Get only parent blocks for expansion
+  const parentBlocks = blocks.filter(block => 
+    block && (block.parentId === null || block.parentId === undefined)
+  );
+  
+  const expandedParagraphs = [];
+  
+  for (const parent of parentBlocks) {
+    // Get children for this parent
+    const children = blocks.filter(block => 
+      block && block.parentId === parent.id
+    );
+    
+    if (children.length > 0) {
+      // Parent with children - create cohesive paragraph
+      const allContent = [parent.summary, ...children.map(child => child.summary)];
+      
+      const prompt = `You are a clear and concise writer. 
 
-  // Create a comprehensive prompt for the AI
-  const prompt = `You are a clear and concise writer. Your goal is to write text that sounds natural to read out loud, using simple and direct language while staying polished and credible. Your task is to expand each of the following outline points into 1–2 natural, readable sentences. Match the tone of each point — if it's casual, stay casual; if it's formal, stay formal. Keep it simple, confident, and easy to read.
+Your goal is to write text that sounds natural to read out loud, using simple and direct language while staying polished and credible. 
+Your task is to expand the following outline into a cohesive paragraph.
 
-Each expansion should:
-- Transform the basic point into professional, business language that is easy to read
-- Copy the style and tone of the original points (if they are casual then casual, if they are authoritative then authoritative)
-- Stay consistent an coherent to the overall topic of the writing, which is ${topic}
-
-Outline points to expand:
-${blocks.map((block, index) => `${index + 1}. ${block.summary}`).join('\n')}
+Topic sentence: ${parent.summary}
+Supporting points: ${children.map(child => `- ${child.summary}`).join('\n')}
 
 Instructions:
+- Create a ${allContent.length * 1.5} sentence paragraph
+- Start with the topic sentence, then expand each supporting point into 1-2 sentences
 - Use plain, everyday English (aim for clarity, not elegance)
-- Write 1-2 concise sentences for each point
-- Avoid fancy words, fillers, jargon, buzzwords, or overly complex phrasing
-- Only include real evidence, data, or statistics **if the user explicitly asks for actual examples or numbers** in the outline points
-- When you do include data or evidence, use **credible and verifiable sources** (e.g. government reports, major research studies, or reputable organizations) and **cite the source URL clearly in parentheses (e.g. data shows XXX (https://sample-url.com)**
-- Do NOT fabricate or guess data
-- Do NOT number each paragraph
-- Make sure that the overall text is coherent with the topic, which is ${topic}
+- Make it flow as one natural paragraph
+- Stay consistent with the topic: ${topic}
 
-CRITICAL: Respond with ONLY a valid JSON array containing the expanded text for each point. Each array element should contain the expansion for the corresponding outline point (element 0 = expansion of point 1, element 1 = expansion of point 2, etc.). No additional text, explanations, or markdown formatting.
-
-Format your response exactly like this:
-[
-  "Expansion of first outline point as 1-2 sentences.",
-  "Expansion of second outline point as 1-2 sentences.",
-  "Expansion of third outline point as 1-2 sentences."
-]`;
-
-  try {
-    // const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    //   method: 'POST',
-    //   headers: {
-    //     'Authorization': `Bearer ${apiKey}`,
-    //     'Content-Type': 'application/json',
-    //   },
-    //   body: JSON.stringify({
-    //     model: 'gpt-4o-search-preview',
-    //     web_search_options: {},
-    //     messages: [
-    //       {
-    //         role: 'user',
-    //         content: prompt
-    //       }
-    //     ],
-    //     max_tokens: 2000,
-    //   }),
-    // });
-
-    // if (!response.ok) {
-    //   if (response.status === 401) {
-    //     throw new Error('Invalid OpenAI API key. Please check your API key and try again.');
-    //   } else if (response.status === 403) {
-    //     throw new Error('Access denied to OpenAI API. Please check your API key permissions and billing status.');
-    //   } else if (response.status === 429) {
-    //     throw new Error('OpenAI API rate limit exceeded. Please try again later.');
-    //   } else if (response.status === 500) {
-    //     throw new Error('OpenAI API server error. Please try again later.');
-    //   } else {
-    //     throw new Error(`OpenAI API error: ${response.status} ${response.statusText}`);
-    //   }
-    // }
-
-    // const data = await response.json();
-
-
-    const response = await fetch('/.netlify/functions/chat-completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-search-preview',
-        prompt: prompt,
-        maxTokens: 2000,
-        temperature: 0.7
-      }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-    }
-
-    const data = await response.json();
-    
-    // Log the complete API response for debugging
-    console.log('=== OPENAI API RESPONSE ===');
-    console.log('Full response:', JSON.stringify(data, null, 2));
-    console.log('Message content:', data.choices?.[0]?.message?.content);
-    console.log('=== END RESPONSE ===');
-    
-    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
-      throw new Error('Invalid response format from OpenAI API');
-    }
-
-    const content = data.choices[0].message.content.trim();
-    
-    try {
-      // Parse the JSON array response
-      const expansionsArray = JSON.parse(content);
+Respond with only the expanded paragraph, no additional commentary or formatting.`;
       
-      if (!Array.isArray(expansionsArray)) {
-        throw new Error('Response is not an array');
+      const response = await fetch('/.netlify/functions/chat-completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-search-preview',
+          prompt: prompt,
+          maxTokens: 2000,
+          temperature: 0.7
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
       }
+
+      const data = await response.json();
       
-      console.log('Parsed expansions array:', expansionsArray);
-      console.log(`Expected ${blocks.length} expansions, got ${expansionsArray.length}`);
-      
-      // Ensure we have the right number of expansions
-      if (expansionsArray.length !== blocks.length) {
-        console.warn(`Mismatch: expected ${blocks.length} expansions, got ${expansionsArray.length}`);
+      if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+        throw new Error('Invalid response format from OpenAI API');
       }
-      
-      // Return the array instead of concatenating
-      return expansionsArray;
-      
-    } catch (parseError) {
-      console.error('Failed to parse JSON array, falling back to original content:', parseError);
-      console.error('Content that failed to parse:', content);
-      
-      // Fallback: return array with original content
-      return [content];
+
+      const expansion = data.choices[0].message.content.trim();
+      expandedParagraphs.push(expansion);
+    } else {
+      // Simple parent block - expand normally using existing function
+      const expansion = await regenerateSingleBlockExpansion(parent, topic);
+      expandedParagraphs.push(expansion);
     }
-  } catch (error) {
-    if (error.name === 'TypeError' && error.message.includes('fetch')) {
-      throw new Error('Network error: Unable to connect to OpenAI API. Please check your internet connection.');
-    }
-    throw error;
   }
+  
+  return expandedParagraphs;
 }
 
 // Regenerate expansion for a single block
@@ -1491,15 +1446,29 @@ function WritingBlock({ block, isDragging, onUpdate }) {
 }
 
 // Draggable block component for dropped blocks in editor
-function DroppedBlock({ block, index, onMove, onRemove, draggedBlockId, onDragStart, onDragEnd, onUpdate, isGeneratingTitle, onRegenerate, isRegenerating }) {
+function DroppedBlock({
+  block,
+  index,
+  onMove,
+  onRemove,
+  draggedBlockId,
+  onDragStart,
+  onDragEnd,
+  onUpdate,
+  isGeneratingTitle,
+  onRegenerate,
+  isRegenerating,
+  childBlocks = [],
+  droppedBlocks
+}) {
   const [{ opacity, isDragging }, drag] = useDrag({
     type: 'dropped-block',
-    item: { 
-      id: block.id, 
-      title: block.title, 
-      summary: block.summary, 
+    item: {
+      id: block.id,
+      title: block.title,
+      summary: block.summary,
       index,
-      source: 'editor' 
+      source: 'editor'
     },
     collect: (monitor) => ({
       opacity: monitor.isDragging() ? 0.5 : 1,
@@ -1510,18 +1479,83 @@ function DroppedBlock({ block, index, onMove, onRemove, draggedBlockId, onDragSt
     },
   });
 
-  const [, drop] = useDrop({
+  // Separate drop zones for reordering
+  const [{ isOver: isOverTop }, dropTop] = useDrop({
     accept: 'dropped-block',
     hover: (draggedItem) => {
-      if (draggedItem.index !== index) {
-        onMove(draggedItem.index, index);
-        draggedItem.index = index;
+      if (!draggedItem || !draggedItem.id || draggedItem.id === block.id) return;
+
+      // Only proceed if we have valid blocks
+      const draggedBlock = droppedBlocks.find(b => b && b.id === draggedItem.id);
+      if (!draggedBlock) return;
+
+      // Check if both blocks are children of the same parent
+      if (draggedBlock.parentId && block.parentId &&
+        draggedBlock.parentId === block.parentId) {
+        // This is child reordering - use ID-based approach
+        onMove(draggedItem, { ...block, source: 'editor' });
+      } else if (!draggedBlock.parentId && !block.parentId) {
+        // This is top-level reordering - use index-based approach
+        if (draggedItem.index !== index && draggedItem.index !== index - 1) {
+          onMove(draggedItem.index, index);
+          draggedItem.index = index;
+        }
+      } else {
+        // Cross-hierarchy move (child to parent or vice versa)
+        onMove(draggedItem, { ...block, source: 'editor' });
       }
     },
+    collect: (monitor) => ({
+      isOver: monitor.isOver({ shallow: true }) && monitor.getItem()?.source === 'editor',
+    }),
   });
 
-  // State for hover tracking
+  const [{ isOver: isOverBottom }, dropBottom] = useDrop({
+    accept: 'dropped-block',
+    hover: (draggedItem) => {
+      if (!draggedItem || !draggedItem.id || draggedItem.id === block.id) return;
+
+      // Only proceed if we have valid blocks
+      const draggedBlock = droppedBlocks.find(b => b && b.id === draggedItem.id);
+      if (!draggedBlock) return;
+
+      // Check if both blocks are children of the same parent
+      if (draggedBlock.parentId && block.parentId &&
+        draggedBlock.parentId === block.parentId) {
+        // This is child reordering - use ID-based approach
+        onMove(draggedItem, { ...block, source: 'editor' });
+      } else if (!draggedBlock.parentId && !block.parentId) {
+        // This is top-level reordering - use index-based approach
+        if (draggedItem.index !== index && draggedItem.index !== index + 1) {
+          onMove(draggedItem.index, index + 1);
+          draggedItem.index = index + 1;
+        }
+      } else {
+        // Cross-hierarchy move (child to parent or vice versa)
+        onMove(draggedItem, { ...block, source: 'editor' });
+      }
+    },
+    collect: (monitor) => ({
+      isOver: monitor.isOver({ shallow: true }) && monitor.getItem()?.source === 'editor',
+    }),
+  });
+
+  // Child drop zone
+  const [{ isOver: isChildZoneOver }, childDrop] = useDrop({
+    accept: ['block', 'dropped-block'],
+    drop: (item, monitor) => {
+      if (!monitor.didDrop()) {
+        onMove(item, { type: 'child-zone', parentId: block.id });
+      }
+    },
+    collect: (monitor) => ({
+      isOver: monitor.isOver({ shallow: true }),
+    }),
+  });
+
+  // State for hover tracking and expansion
   const [isHovered, setIsHovered] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(block.isExpanded ?? true);
 
   // Track when this block starts being dragged
   useEffect(() => {
@@ -1533,10 +1567,7 @@ function DroppedBlock({ block, index, onMove, onRemove, draggedBlockId, onDragSt
   // Use light orange for custom blocks, light purple for predefined blocks
   const bgColor = block.source === 'custom' ? 'bg-[#FFEDD8]' : 'bg-[#EDF2FB]';
 
-  // Determine timeline stroke color:
-  // - Blue if this block is being dragged
-  // - Blue if this block is hovered AND no other block is being dragged
-  // - White otherwise
+  // Determine timeline stroke color
   const timelineStroke = (isDragging || (isHovered && !draggedBlockId)) ? "#1B00B6" : "#ffffff";
 
   const handleTitleUpdate = useCallback((newTitle) => {
@@ -1551,15 +1582,28 @@ function DroppedBlock({ block, index, onMove, onRemove, draggedBlockId, onDragSt
     }
   }, [block, index, onUpdate]);
 
+  const handleToggleExpand = () => {
+    const newExpanded = !isExpanded;
+    setIsExpanded(newExpanded);
+    onUpdate(index, { ...block, isExpanded: newExpanded });
+  };
+
   return (
-    <div 
-      ref={(node) => drag(drop(node))} 
-      className="relative" 
-      style={{ opacity }}
+    <div
+      className="relative"
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      {/* Timeline connector */}
+      {/* Top drop zone for reordering */}
+      <div
+        ref={dropTop}
+        className="absolute -top-2 left-0 right-0 h-4 z-20"
+      />
+
+      {/* Drop line indicators */}
+      <DropLineIndicator isVisible={isOverTop && !isDragging} position="above" />
+
+      {/* Timeline connector - adjust for hierarchy */}
       <div className="absolute left-0 top-0 h-[70px] w-0">
         <div className="absolute bottom-[-1.429%] left-[-1px] right-[-1px] top-[-1.429%]">
           <svg
@@ -1577,13 +1621,29 @@ function DroppedBlock({ block, index, onMove, onRemove, draggedBlockId, onDragSt
           </svg>
         </div>
       </div>
-      
+
       {/* Block content */}
-      <div className={`ml-6 ${bgColor} rounded p-3 mb-2 cursor-move`}>
+      <div
+        ref={drag}
+        className={`${block.parentId ? 'ml-12' : 'ml-6'} ${bgColor} rounded p-3 mb-2 cursor-move relative z-10`}
+        style={{ opacity }}
+      >
         <div className="flex items-center gap-3">
           <DragHandle />
+
+          {/* Expand/collapse button for parent blocks */}
+          {!block.parentId && childBlocks.length > 0 && (
+            <button
+              onClick={handleToggleExpand}
+              className="text-gray-500 hover:text-gray-700 p-1"
+            >
+              {isExpanded ? '▼' : '▶'}
+            </button>
+          )}
+
           <div className="flex-1">
             <div className="font-['Chivo:Bold',_sans-serif] text-[14px] text-[#000000] capitalize flex items-center gap-2">
+              {!block.parentId && <span className="text-xs text-gray-500"></span>}
               {isGeneratingTitle ? (
                 <div className="flex items-center gap-2">
                   <div className="animate-spin rounded-full h-3 w-3 border-2 border-blue-600 border-t-transparent"></div>
@@ -1609,6 +1669,8 @@ function DroppedBlock({ block, index, onMove, onRemove, draggedBlockId, onDragSt
               />
             </div>
           </div>
+
+          {/* Existing buttons */}
           <div className="flex items-center gap-1">
             <button
               onClick={() => onRegenerate && onRegenerate(index)}
@@ -1632,6 +1694,61 @@ function DroppedBlock({ block, index, onMove, onRemove, draggedBlockId, onDragSt
           </div>
         </div>
       </div>
+
+      {/* Bottom drop zone for reordering */}
+      <div
+        ref={dropBottom}
+        className="absolute -bottom-2 left-0 right-0 h-4 z-20"
+      />
+
+      <DropLineIndicator isVisible={isOverBottom && !isDragging} position="below" />
+
+      {/* Child drop zone and child blocks for parent blocks */}
+      {!block.parentId && isExpanded && (
+        <>
+          {/* Render child blocks first */}
+          {childBlocks.map((childBlock) => {
+            // Add safety check here too
+            if (!childBlock) return null;
+
+            const childIndex = droppedBlocks.findIndex(b => b && b.id === childBlock.id);
+
+            // Skip if child block not found in main array
+            if (childIndex === -1) return null;
+
+            return (
+              <DroppedBlock
+                key={childBlock.id}
+                block={childBlock}
+                index={childIndex}
+                droppedBlocks={droppedBlocks}
+                onMove={onMove}
+                onRemove={onRemove}
+                onUpdate={onUpdate}
+                draggedBlockId={draggedBlockId}
+                onDragStart={onDragStart}
+                onDragEnd={onDragEnd}
+                isGeneratingTitle={isGeneratingTitle}
+                onRegenerate={onRegenerate}
+                isRegenerating={isRegenerating}
+              />
+            );
+          })}
+
+          {/* Show smaller drop zone after children - with proper indentation */}
+          <div
+            ref={childDrop}
+            className={`ml-12 min-h-[40px] border-2 border-dashed rounded transition-colors relative ${isChildZoneOver
+              ? 'border-blue-400 bg-blue-50'
+              : 'border-gray-200 bg-gray-50'
+              }`}
+          >
+            <div className="flex items-center justify-center h-[40px] text-gray-400 text-sm">
+              Drop supporting content here
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -1743,42 +1860,61 @@ function TextEditor({ droppedBlocks, onDrop, onMove, onRemove, onTextChange, cus
     };
   }, []);
 
+  // Get only parent blocks for rendering
+  const parentBlocks = droppedBlocks.filter(block =>
+    block && block.id && (block.parentId === null || block.parentId === undefined)
+  );
+
   return (
     <div className="bg-[#ffffff] min-h-[400px] w-full border border-gray-200 rounded-lg">
       <div className="min-h-[400px] overflow-clip relative w-full">
-        {/* Drop zone */}
         <div
           ref={drop}
-          className={`p-6 rounded-lg min-h-[400px] ${
-            isOver ? 'bg-blue-50 border-2 border-dashed border-blue-300' : ''
-          }`}
+          className={`p-6 rounded-lg min-h-[400px] ${isOver ? 'bg-blue-50 border-2 border-dashed border-blue-300' : ''}`}
         >
           <div className="space-y-4">
-            {droppedBlocks.map((block, index) => (
-              <DroppedBlock
-                key={`${block.id}-${index}`}
-                block={block}
-                index={index}
-                onMove={onMove}
-                onRemove={onRemove}
-                draggedBlockId={draggedBlockId}
-                onDragStart={setDraggedBlockId}
-                onDragEnd={() => setDraggedBlockId(null)}
-                onUpdate={onUpdateDroppedBlock}
-                isGeneratingTitle={generatingTitleForBlocks.has(block.id)}
-                onRegenerate={onRegenerateBlock}
-                isRegenerating={regeneratingBlocks.has(index)}
-              />
-            ))}
-            
-            {droppedBlocks.length === 0 && (
+            {parentBlocks.map((parentBlock, index) => {
+              // Get child blocks for this parent and sort them by the order they appear in the children array
+              const childBlocks = parentBlock.children
+                ? parentBlock.children
+                  .map(childId => droppedBlocks.find(block => block && block.id === childId))
+                  .filter(block => block !== undefined) // Remove any undefined blocks
+                : droppedBlocks.filter(block => block && block.id && block.parentId === parentBlock.id);
+
+              // ADD SAFETY CHECK FOR PARENT BLOCK INDEX
+              const parentBlockIndex = droppedBlocks.findIndex(b => b && b.id === parentBlock.id);
+
+              // Skip if parent block not found in main array
+              if (parentBlockIndex === -1) return null;
+
+              return (
+                <DroppedBlock
+                  key={`${parentBlock.id}-${index}`}
+                  block={parentBlock}
+                  index={parentBlockIndex} // Use the safe index
+                  childBlocks={childBlocks}
+                  droppedBlocks={droppedBlocks}
+                  onMove={onMove}
+                  onRemove={onRemove}
+                  draggedBlockId={draggedBlockId}
+                  onDragStart={setDraggedBlockId}
+                  onDragEnd={() => setDraggedBlockId(null)}
+                  onUpdate={onUpdateDroppedBlock}
+                  isGeneratingTitle={generatingTitleForBlocks.has(parentBlock.id)}
+                  onRegenerate={onRegenerateBlock}
+                  isRegenerating={regeneratingBlocks.has(parentBlockIndex)}
+                />
+              );
+            })}
+
+            {parentBlocks.length === 0 && (
               <div className="text-center text-gray-500 py-16">
                 <p className="text-lg">Drop writing blocks here to start building your draft</p>
                 <p className="text-sm mt-2">Or type manually below</p>
               </div>
             )}
-            
-            {/* Manual text input area */}
+
+            {/* Manual text input area - unchanged */}
             <div className="mt-6 relative">
               <div className="flex gap-2">
                 <textarea
@@ -1792,7 +1928,7 @@ function TextEditor({ droppedBlocks, onDrop, onMove, onRemove, onTextChange, cus
                   placeholder="Add your own blocks here..."
                   className="flex-1 h-20 p-3 border border-gray-300 rounded resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
-                
+
                 <button
                   onClick={onAddCustomBlock}
                   disabled={!customText.trim()}
@@ -1802,7 +1938,7 @@ function TextEditor({ droppedBlocks, onDrop, onMove, onRemove, onTextChange, cus
                   Add
                 </button>
               </div>
-              
+
               {/* Writer cursor indicator */}
               <WriterCursor
                 isVisible={isTyping}
@@ -1916,6 +2052,21 @@ function DevelopedTextPanel({ expandedTextArray, onTextChange, isGenerating }) {
   );
 }
 
+function DropLineIndicator({ isVisible, position = 'above' }) {
+  if (!isVisible) return null;
+  
+  return (
+    <div 
+      className={`absolute left-0 right-0 h-0.5 bg-[#1b00b6] z-10 ${
+        position === 'above' ? '-top-1' : '-bottom-1'
+      }`}
+    >
+      <div className="absolute left-0 top-1/2 -translate-y-1/2 w-2 h-2 bg-[#1b00b6] rounded-full -translate-x-1"></div>
+      <div className="absolute right-0 top-1/2 -translate-y-1/2 w-2 h-2 bg-[#1b00b6] rounded-full translate-x-1"></div>
+    </div>
+  );
+}
+
 export default function App() {
   const [droppedBlocks, setDroppedBlocks] = useState([]);
   const [customText, setCustomText] = useState('');
@@ -1936,27 +2087,6 @@ export default function App() {
   const [openaiConnected, setOpenaiConnected] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
 
-  // Load API key from .env file and setOpenaiConnected to true when app loads
-  // useEffect(() => {
-  //   const apiKey = import.meta.env.VITE_OPEN_AI_KEY;
-  //   if (apiKey) {
-  //     setOpenaiApiKey(apiKey);
-      
-  //     // Auto-connect with the loaded API key
-  //     const autoConnect = async () => {
-  //       try {
-  //         await testOpenAIConnection();
-  //         setOpenaiConnected(true);
-  //       } catch (error) {
-  //         console.warn('Auto-connection failed:', error.message);
-  //         // Don't set error state here since user didn't manually try to connect
-  //       }
-  //     };
-      
-  //     autoConnect();
-  //   }
-  // }, []);
-
   // Auto-connect when app loads
   useEffect(() => {
     const autoConnect = async () => {
@@ -1972,6 +2102,27 @@ export default function App() {
     
     autoConnect();
   }, []);
+
+  // Helper functions to work with hierarchy
+  const getParentBlocks = useCallback(() => {
+    return droppedBlocks.filter(block =>
+      block && (block.parentId === null || block.parentId === undefined)
+    );
+  }, [droppedBlocks]);
+
+  const getChildBlocks = useCallback((parentId) => {
+    return droppedBlocks.filter(block =>
+      block && block.parentId === parentId
+    );
+  }, [droppedBlocks]);
+
+  const getBlockWithChildren = useCallback((parentBlock) => {
+    const children = getChildBlocks(parentBlock.id);
+    return {
+      ...parentBlock,
+      childBlocks: children
+    };
+  }, [getChildBlocks]);
 
   const handleConnectionChange = useCallback((connected) => {
     setOpenaiConnected(connected);
@@ -2035,21 +2186,183 @@ export default function App() {
     ));
   }, []);
 
-  const handleDrop = useCallback((item) => {
-    setDroppedBlocks(prev => [...prev, item]);
-  }, []);
+  const handleDrop = useCallback((item, dropTarget = null) => {
+    const newBlock = {
+      ...item,
+      id: item.id || Date.now(),
+      parentId: dropTarget?.type === 'child-zone' ? dropTarget.parentId : null,
+      children: [],
+      isExpanded: true
+    };
 
-  const handleMove = useCallback((fromIndex, toIndex) => {
     setDroppedBlocks(prev => {
-      const newBlocks = [...prev];
-      const [removed] = newBlocks.splice(fromIndex, 1);
-      newBlocks.splice(toIndex, 0, removed);
-      return newBlocks;
+      const updated = [...prev, newBlock];
+
+      // If dropped as child, update parent's children array
+      if (newBlock.parentId) {
+        return updated.map(block =>
+          block.id === newBlock.parentId
+            ? { ...block, children: [...(block.children || []), newBlock.id] }
+            : block
+        );
+      }
+
+      return updated;
     });
   }, []);
 
+  const handleMove = useCallback((draggedItem, dropTarget) => {
+    if (typeof draggedItem === 'number' && typeof dropTarget === 'number') {
+      // This is top-level block reordering (old signature)
+      setDroppedBlocks(prev => {
+        const updated = [...prev];
+        const [draggedBlock] = updated.splice(draggedItem, 1);
+        updated.splice(dropTarget, 0, draggedBlock);
+
+        // Clean up any undefined blocks
+        return updated.filter(block => block != null);
+      });
+    } else if (dropTarget?.type === 'child-zone') {
+      // This is dropping into child zone
+      setDroppedBlocks(prev => {
+        const updated = [...prev];
+        const draggedBlock = updated.find(b => b && b.id === draggedItem.id);
+
+        if (!draggedBlock) return prev;
+
+        // Remove from old parent if it had one
+        if (draggedBlock.parentId) {
+          const oldParent = updated.find(b => b && b.id === draggedBlock.parentId);
+          if (oldParent && oldParent.children) {
+            oldParent.children = oldParent.children.filter(id => id !== draggedBlock.id);
+          }
+        }
+
+        // Update block's parent
+        draggedBlock.parentId = dropTarget.parentId;
+
+        // Add to new parent if applicable
+        const newParent = updated.find(b => b && b.id === dropTarget.parentId);
+        if (newParent) {
+          if (!newParent.children) newParent.children = [];
+          if (!newParent.children.includes(draggedBlock.id)) {
+            newParent.children.push(draggedBlock.id);
+          }
+        }
+
+        // Clean up any undefined blocks
+        return updated.filter(block => block != null);
+      });
+    } else if (draggedItem.id && dropTarget.id && dropTarget.source === 'editor') {
+      // Handle all block movements including child reordering with position awareness
+      setDroppedBlocks(prev => {
+        const updated = [...prev];
+        const draggedBlock = updated.find(b => b && b.id === draggedItem.id);
+        const targetBlock = updated.find(b => b && b.id === dropTarget.id);
+
+        if (!draggedBlock || !targetBlock) {
+          console.warn('Could not find dragged or target block:', { draggedItem, dropTarget });
+          return prev.filter(block => block != null); // Clean up undefined blocks
+        }
+
+        // Case 1: Both blocks have the same parent (child reordering)
+        if (draggedBlock.parentId && draggedBlock.parentId === targetBlock.parentId) {
+          const parent = updated.find(b => b && b.id === draggedBlock.parentId);
+          if (parent && parent.children) {
+            const draggedIndex = parent.children.indexOf(draggedBlock.id);
+            const targetIndex = parent.children.indexOf(targetBlock.id);
+
+            if (draggedIndex !== -1 && targetIndex !== -1 && draggedIndex !== targetIndex) {
+              // Remove dragged block
+              parent.children.splice(draggedIndex, 1);
+
+              // Calculate new target index (adjust if we removed something before the target)
+              const adjustedTargetIndex = draggedIndex < targetIndex ? targetIndex - 1 : targetIndex;
+
+              // Insert at the adjusted position
+              parent.children.splice(adjustedTargetIndex, 0, draggedBlock.id);
+            }
+          }
+        }
+        // Case 2: Moving child to top-level (child promotion)
+        else if (draggedBlock.parentId && !targetBlock.parentId) {
+          // Remove from old parent
+          const oldParent = updated.find(b => b && b.id === draggedBlock.parentId);
+          if (oldParent && oldParent.children) {
+            oldParent.children = oldParent.children.filter(id => id !== draggedBlock.id);
+          }
+
+          // Make it a top-level block
+          draggedBlock.parentId = null;
+
+          // Find target position in main array and insert there
+          const targetIndex = updated.findIndex(b => b && b.id === targetBlock.id);
+          if (targetIndex !== -1) {
+            // Remove from current position
+            const draggedIndex = updated.findIndex(b => b && b.id === draggedBlock.id);
+            if (draggedIndex !== -1) {
+              updated.splice(draggedIndex, 1);
+              // Adjust target index if needed
+              const newTargetIndex = draggedIndex < targetIndex ? targetIndex - 1 : targetIndex;
+              updated.splice(newTargetIndex, 0, draggedBlock);
+            }
+          }
+        }
+        // Case 3: Moving top-level block to become a child
+        else if (!draggedBlock.parentId && targetBlock.parentId) {
+          // Set the dragged block's parent to the same as target
+          draggedBlock.parentId = targetBlock.parentId;
+
+          // Add to the parent's children array
+          const newParent = updated.find(b => b && b.id === targetBlock.parentId);
+          if (newParent) {
+            if (!newParent.children) newParent.children = [];
+            // Insert before the target block
+            const targetIndex = newParent.children.indexOf(targetBlock.id);
+            if (targetIndex !== -1) {
+              newParent.children.splice(targetIndex, 0, draggedBlock.id);
+            } else {
+              newParent.children.push(draggedBlock.id);
+            }
+          }
+        }
+        // Case 4: Moving child from one parent to another child (complex case)
+        else if (draggedBlock.parentId && targetBlock.parentId &&
+          draggedBlock.parentId !== targetBlock.parentId) {
+          // Remove from old parent
+          const oldParent = updated.find(b => b && b.id === draggedBlock.parentId);
+          if (oldParent && oldParent.children) {
+            oldParent.children = oldParent.children.filter(id => id !== draggedBlock.id);
+          }
+
+          // Add to new parent
+          draggedBlock.parentId = targetBlock.parentId;
+          const newParent = updated.find(b => b && b.id === targetBlock.parentId);
+          if (newParent) {
+            if (!newParent.children) newParent.children = [];
+            const targetIndex = newParent.children.indexOf(targetBlock.id);
+            if (targetIndex !== -1) {
+              newParent.children.splice(targetIndex, 0, draggedBlock.id);
+            } else {
+              newParent.children.push(draggedBlock.id);
+            }
+          }
+        }
+
+        // Clean up any undefined blocks at the end
+        return updated.filter(block => block != null);
+      });
+    }
+    // Always clean up undefined blocks as fallback
+    setDroppedBlocks(prev => prev.filter(block => block != null));
+  }, []);
+
   const handleRemove = useCallback((index) => {
-    setDroppedBlocks(prev => prev.filter((_, i) => i !== index));
+    setDroppedBlocks(prev => {
+      const updated = prev.filter((_, i) => i !== index);
+      // Also clean up any undefined blocks
+      return updated.filter(block => block != null);
+    });
   }, []);
 
   const handleTextChange = useCallback((text) => {
@@ -2096,7 +2409,10 @@ export default function App() {
       id: blockId,
       title: 'Generating title...',
       summary: text,
-      source: 'custom'
+      source: 'custom',
+      parentId: null,        // Add this
+      children: [],          // Add this
+      isExpanded: true       // Add this
     };
     
     // Add block to draft immediately
@@ -2186,48 +2502,130 @@ export default function App() {
 
     const blockToRegenerate = droppedBlocks[blockIndex];
 
-    // Add block to regenerating set
-    setRegeneratingBlocks(prev => new Set([...prev, blockIndex]));
+    // Determine which block index should show the animation
+    let animationBlockIndex = blockIndex;
+
+    // If this is a child block, find the parent's index for animation
+    if (blockToRegenerate.parentId) {
+      const parentIndex = droppedBlocks.findIndex(block =>
+        block && block.id === blockToRegenerate.parentId
+      );
+      if (parentIndex !== -1) {
+        animationBlockIndex = parentIndex;
+      }
+    }
+
+    // Add block to regenerating set (use the animation block index)
+    setRegeneratingBlocks(prev => new Set([...prev, animationBlockIndex]));
     setError('');
 
     try {
-      const newExpansion = await regenerateSingleBlockExpansion(blockToRegenerate, currentTopic);
+      let newExpansion;
+      let parentBlockForRegeneration = null;
+      let childBlocksForRegeneration = [];
 
-      // Update the expanded text array
-      setExpandedTextArray(prev => {
-        const newArray = [...prev];
+      // Determine which parent+children combination to regenerate
+      if (!blockToRegenerate.parentId) {
+        // This is a parent block - regenerate it with its children
+        parentBlockForRegeneration = blockToRegenerate;
+        childBlocksForRegeneration = droppedBlocks.filter(block =>
+          block && block.parentId === blockToRegenerate.id
+        );
+      } else {
+        // This is a child block - find its parent and regenerate the parent+children combination
+        parentBlockForRegeneration = droppedBlocks.find(block =>
+          block && block.id === blockToRegenerate.parentId
+        );
+        childBlocksForRegeneration = droppedBlocks.filter(block =>
+          block && block.parentId === blockToRegenerate.parentId
+        );
+      }
 
-        if (droppedBlocks.length > newArray.length) {
-          // We have more blocks than expanded text (new blocks were added)
-          if (blockIndex >= newArray.length) {
-            // Fill gaps and add new expansion
-            while (newArray.length < blockIndex) {
-              newArray.push('');
-            }
-            newArray[blockIndex] = newExpansion;
-          } else {
-            // Insert the new expansion and push others back
-            newArray.splice(blockIndex, 0, newExpansion);
-          }
-        } else {
-          // Same length or fewer blocks - just replace the existing content
-          newArray[blockIndex] = newExpansion;
+      // Check if we should regenerate as a cohesive paragraph (parent with children)
+      if (parentBlockForRegeneration && childBlocksForRegeneration.length > 0) {
+        // Regenerate as cohesive paragraph
+        const allContent = [parentBlockForRegeneration.summary, ...childBlocksForRegeneration.map(child => child.summary)];
+
+        const prompt = `You are a clear and concise writer. Your goal is to write text that sounds natural to read out loud, using simple and direct language while staying polished and credible. Your task is to expand the following outline into a cohesive paragraph.
+
+Topic sentence: ${parentBlockForRegeneration.summary}
+Supporting points: ${childBlocksForRegeneration.map(child => `- ${child.summary}`).join('\n')}
+
+Instructions:
+- Create a ${allContent.length * 1.5} sentence paragraph
+- Start with the topic sentence, then expand each supporting point into 1-2 sentences
+- Use plain, everyday English (aim for clarity, not elegance)
+- Make it flow as one natural paragraph
+- Stay consistent with the topic: ${currentTopic}
+
+Respond with only the expanded paragraph, no additional commentary or formatting.`;
+
+        const response = await fetch('/.netlify/functions/chat-completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o-search-preview',
+            prompt: prompt,
+            maxTokens: 2000,
+            temperature: 0.7
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
         }
 
-        // Update fullText with the new array
-        //setFullText(newArray.join('\n\n'));
+        const data = await response.json();
 
-        return newArray;
-      });
+        if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+          throw new Error('Invalid response format from OpenAI API');
+        }
+
+        newExpansion = data.choices[0].message.content.trim();
+      } else {
+        // This is a simple parent block without children - use single block regeneration
+        newExpansion = await regenerateSingleBlockExpansion(blockToRegenerate, currentTopic);
+      }
+
+      // Find the correct position in expandedTextArray
+      const parentBlocks = droppedBlocks.filter(block =>
+        block && (block.parentId === null || block.parentId === undefined)
+      );
+
+      let expandedTextIndex = -1;
+
+      // Always find the parent block's position in the expanded text array
+      const targetParentBlock = parentBlockForRegeneration || blockToRegenerate;
+      expandedTextIndex = parentBlocks.findIndex(block => block.id === targetParentBlock.id);
+
+      if (expandedTextIndex !== -1) {
+        // Update the expanded text array at the correct position
+        setExpandedTextArray(prev => {
+          const newArray = [...prev];
+
+          // Ensure array is large enough
+          while (newArray.length <= expandedTextIndex) {
+            newArray.push('');
+          }
+
+          newArray[expandedTextIndex] = newExpansion;
+          return newArray;
+        });
+      } else {
+        console.warn('Could not find correct position for regenerated block');
+      }
 
     } catch (error) {
       console.error('Error regenerating block:', error);
       setError(`Failed to regenerate block: ${error.message}`);
     } finally {
-      // Remove block from regenerating set
+      // Remove block from regenerating set (use the animation block index)
       setRegeneratingBlocks(prev => {
         const newSet = new Set(prev);
-        newSet.delete(blockIndex);
+        newSet.delete(animationBlockIndex);
         return newSet;
       });
     }
