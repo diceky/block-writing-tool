@@ -5,13 +5,14 @@
 
   ## Running the code
 
-  Run `npm i` to install the dependencies.
-  Run `npm run dev` to start the development server.
+  1. Run `npm i` to install the dependencies.
+  2. Make an `.env` file and add your Open AI API key as `OPENAI_API_KEY = xxxxxxxx`.
+  3. This code uses Netlify Functions for the API calls, so `npm run dev` will not work. Instead, install [Netlify CLI](https://docs.netlify.com/api-and-cli-guides/cli-guides/get-started-with-cli/#run-builds-locally) and run `netlify dev`.
   
   ## Architecture
 
 - **Frontend**: React + Vite + Tailwind CSS
-- **Backend**: Netlify Functions (serverless)
+- **Backend**: Netlify Functions
 - **AI Provider**: OpenAI GPT-4o models
 - **Drag & Drop**: React DnD
 - **Deployment**: Netlify
