@@ -220,7 +220,7 @@ Generate exactly 8 blocks with specific, actionable guidance for someone writing
             source: 'generated',
             parentId: null,        // Add this
             children: [],          // Add this
-            isExpanded: true       // Add this
+            //isExpanded: true       // Add this
           };
         }
 
@@ -231,7 +231,7 @@ Generate exactly 8 blocks with specific, actionable guidance for someone writing
           source: 'generated',
           parentId: null,          // Add this
           children: [],            // Add this
-          isExpanded: true         // Add this
+          //isExpanded: true         // Add this
         };
       });
     } catch (parseError) {
@@ -401,7 +401,7 @@ Generate exactly 8 blocks with specific, actionable guidance for someone writing
             source: 'generated',
             parentId: null,
             children: [],
-            isExpanded: true
+            //isExpanded: true
           };
         }
         
@@ -412,7 +412,7 @@ Generate exactly 8 blocks with specific, actionable guidance for someone writing
           source: 'generated',
           parentId: null,
           children: [],
-          isExpanded: true
+          //isExpanded: true
         };
       });
     } catch (parseError) {
@@ -1247,9 +1247,13 @@ function DroppedBlock({
         onMove(draggedItem, { ...block, source: 'editor' });
       } else if (!draggedBlock.parentId && !block.parentId) {
         // This is top-level reordering - use index-based approach
-        if (draggedItem.index !== index && draggedItem.index !== index + 1) {
-          onMove(draggedItem.index, index + 1);
-          draggedItem.index = index + 1;
+        // FIXED: Properly handle moving down for parent blocks with children
+        const draggedIndex = droppedBlocks.findIndex(b => b && b.id === draggedBlock.id);
+        const targetIndex = droppedBlocks.findIndex(b => b && b.id === block.id);
+
+        if (draggedIndex !== -1 && targetIndex !== -1 && draggedIndex !== targetIndex + 1) {
+          onMove(draggedIndex, targetIndex + 1);
+          draggedItem.index = targetIndex + 1;
         }
       } else {
         // Cross-hierarchy move (child to parent or vice versa)
@@ -1266,17 +1270,68 @@ function DroppedBlock({
     accept: ['block', 'dropped-block'],
     drop: (item, monitor) => {
       if (!monitor.didDrop()) {
-        onMove(item, { type: 'child-zone', parentId: block.id });
+        // Prevent dropping a block into its own child zone
+        if (item.id === block.id) {
+          return;
+        }
+
+        // Find the dragged block to check if it has children
+        const draggedBlock = droppedBlocks.find(b => b && b.id === item.id);
+
+        // Prevent dropping parent blocks with children into child zones
+        if (draggedBlock && draggedBlock.children && draggedBlock.children.length > 0) {
+          console.warn('Cannot drop a parent block with children into a child zone');
+          return;
+        }
+
+        // Prevent creating circular relationships - check if the block being dropped
+        // is already a parent of the target block
+        const wouldCreateCircularRelation = (draggedId, targetParentId) => {
+          let currentBlock = droppedBlocks.find(b => b && b.id === targetParentId);
+          while (currentBlock && currentBlock.parentId) {
+            if (currentBlock.parentId === draggedId) {
+              return true;
+            }
+            currentBlock = droppedBlocks.find(b => b && b.id === currentBlock.parentId);
+          }
+          return false;
+        };
+
+        if (!wouldCreateCircularRelation(item.id, block.id)) {
+          onMove(item, { type: 'child-zone', parentId: block.id });
+        }
       }
     },
-    collect: (monitor) => ({
-      isOver: monitor.isOver({ shallow: true }),
-    }),
+    collect: (monitor) => {
+      const draggedItem = monitor.getItem();
+      const draggedBlock = draggedItem ? droppedBlocks.find(b => b && b.id === draggedItem.id) : null;
+
+      return {
+        isOver: monitor.isOver({ shallow: true }) &&
+          draggedItem?.id !== block.id && // Don't show hover state for self
+          !wouldCreateCircularRelation(draggedItem?.id, block.id) && // Don't show hover for circular drops
+          !(draggedBlock && draggedBlock.children && draggedBlock.children.length > 0), // Don't show hover for parent blocks with children
+      };
+    },
   });
+
+  // Helper function to check circular relationships
+const wouldCreateCircularRelation = (draggedId, targetParentId) => {
+  if (!draggedId || !targetParentId) return false;
+  
+  let currentBlock = droppedBlocks.find(b => b && b.id === targetParentId);
+  while (currentBlock && currentBlock.parentId) {
+    if (currentBlock.parentId === draggedId) {
+      return true;
+    }
+    currentBlock = droppedBlocks.find(b => b && b.id === currentBlock.parentId);
+  }
+  return false;
+};
 
   // State for hover tracking and expansion
   const [isHovered, setIsHovered] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(block.isExpanded ?? true);
+  //const [isExpanded, setIsExpanded] = useState(block.isExpanded ?? true);
 
   // Track when this block starts being dragged
   useEffect(() => {
@@ -1303,11 +1358,11 @@ function DroppedBlock({
     }
   }, [block, index, onUpdate]);
 
-  const handleToggleExpand = () => {
-    const newExpanded = !isExpanded;
-    setIsExpanded(newExpanded);
-    onUpdate(index, { ...block, isExpanded: newExpanded });
-  };
+  // const handleToggleExpand = () => {
+  //   const newExpanded = !isExpanded;
+  //   setIsExpanded(newExpanded);
+  //   onUpdate(index, { ...block, isExpanded: newExpanded });
+  // };
 
   return (
     <div
@@ -1346,21 +1401,21 @@ function DroppedBlock({
       {/* Block content */}
       <div
         ref={drag}
-        className={`${block.parentId ? 'ml-12' : 'ml-6'} ${bgColor} rounded p-3 mb-2 cursor-move relative z-10`}
+        className={`${block.parentId ? 'ml-12' : 'ml-6'} ${bgColor} rounded p-3 mb-1 cursor-move relative z-10`}
         style={{ opacity }}
       >
         <div className="flex items-center gap-3">
           <DragHandle />
 
           {/* Expand/collapse button for parent blocks */}
-          {!block.parentId && childBlocks.length > 0 && (
+          {/* {!block.parentId && childBlocks.length > 0 && (
             <button
               onClick={handleToggleExpand}
               className="text-gray-500 hover:text-gray-700 p-1"
             >
               {isExpanded ? '▼' : '▶'}
             </button>
-          )}
+          )} */}
 
           <div className="flex-1">
             <div className="font-['Chivo:Bold',_sans-serif] text-[14px] text-[#000000] capitalize flex items-center gap-2">
@@ -1424,17 +1479,13 @@ function DroppedBlock({
 
       <DropLineIndicator isVisible={isOverBottom && !isDragging} position="below" />
 
-      {/* Child drop zone and child blocks for parent blocks */}
-      {!block.parentId && isExpanded && (
+      {/* Dynamic drop zone - only appears when dragging over this parent */}
+      {!block.parentId && (
         <>
           {/* Render child blocks first */}
           {childBlocks.map((childBlock) => {
-            // Add safety check here too
             if (!childBlock) return null;
-
             const childIndex = droppedBlocks.findIndex(b => b && b.id === childBlock.id);
-
-            // Skip if child block not found in main array
             if (childIndex === -1) return null;
 
             return (
@@ -1456,18 +1507,27 @@ function DroppedBlock({
             );
           })}
 
-          {/* Show smaller drop zone after children - with proper indentation */}
-          <div
-            ref={childDrop}
-            className={`ml-12 min-h-[40px] border-2 border-dashed rounded transition-colors relative ${isChildZoneOver
-              ? 'border-blue-400 bg-blue-50'
-              : 'border-gray-200 bg-gray-50'
-              }`}
-          >
-            <div className="flex items-center justify-center h-[40px] text-gray-400 text-sm">
-              Drop supporting content here
-            </div>
-          </div>
+          {/* Dynamic drop zone - only appears when dragging valid blocks over this parent */}
+          {draggedBlockId &&
+            draggedBlockId !== block.id &&
+            isChildZoneOver && (
+              <div
+                ref={childDrop}
+                className="ml-12 min-h-[40px] border-2 border-dashed rounded transition-colors relative border-blue-400 bg-blue-50"
+              >
+                <div className="flex items-center justify-center h-[60px] text-blue-600 text-sm font-medium">
+                  Drop supporting content here
+                </div>
+              </div>
+            )}
+
+          {/* Hidden drop zone for detecting hover (always present but invisible) */}
+          {(!isChildZoneOver || draggedBlockId === block.id) && (
+            <div
+              ref={childDrop}
+              className="ml-12 min-h-[10px] opacity-0 pointer-events-auto"
+            />
+          )}
         </>
       )}
     </div>
@@ -1913,7 +1973,7 @@ export default function App() {
       id: item.id || Date.now(),
       parentId: dropTarget?.type === 'child-zone' ? dropTarget.parentId : null,
       children: [],
-      isExpanded: true
+      //isExpanded: true
     };
 
     setDroppedBlocks(prev => {
@@ -1937,8 +1997,16 @@ export default function App() {
       // This is top-level block reordering (old signature)
       setDroppedBlocks(prev => {
         const updated = [...prev];
-        const [draggedBlock] = updated.splice(draggedItem, 1);
-        updated.splice(dropTarget, 0, draggedBlock);
+
+        // FIXED: Ensure we're only moving top-level blocks
+        const draggedBlock = updated[draggedItem];
+        const targetBlock = updated[dropTarget];
+
+        if (draggedBlock && targetBlock &&
+          !draggedBlock.parentId && !targetBlock.parentId) {
+          const [removedBlock] = updated.splice(draggedItem, 1);
+          updated.splice(dropTarget, 0, removedBlock);
+        }
 
         // Clean up any undefined blocks
         return updated.filter(block => block != null);
@@ -1950,6 +2018,12 @@ export default function App() {
         const draggedBlock = updated.find(b => b && b.id === draggedItem.id);
 
         if (!draggedBlock) return prev;
+
+        // PREVENT: Don't allow parent blocks with children to become children
+        if (!draggedBlock.parentId && draggedBlock.children && draggedBlock.children.length > 0) {
+          console.warn('Cannot move a parent block with children into a child zone');
+          return prev; // Don't allow the operation
+        }
 
         // Remove from old parent if it had one
         if (draggedBlock.parentId) {
@@ -1983,7 +2057,7 @@ export default function App() {
 
         if (!draggedBlock || !targetBlock) {
           console.warn('Could not find dragged or target block:', { draggedItem, dropTarget });
-          return prev.filter(block => block != null); // Clean up undefined blocks
+          return prev.filter(block => block != null);
         }
 
         // Case 1: Both blocks have the same parent (child reordering)
@@ -1996,12 +2070,8 @@ export default function App() {
             if (draggedIndex !== -1 && targetIndex !== -1 && draggedIndex !== targetIndex) {
               // Remove dragged block
               parent.children.splice(draggedIndex, 1);
-
-              // Calculate new target index (adjust if we removed something before the target)
-              const adjustedTargetIndex = draggedIndex < targetIndex ? targetIndex - 1 : targetIndex;
-
-              // Insert at the adjusted position
-              parent.children.splice(adjustedTargetIndex, 0, draggedBlock.id);
+              // Insert at target position
+              parent.children.splice(targetIndex, 0, draggedBlock.id);
             }
           }
         }
@@ -2016,21 +2086,27 @@ export default function App() {
           // Make it a top-level block
           draggedBlock.parentId = null;
 
-          // Find target position in main array and insert there
+          // SIMPLIFIED: Just move it to right after the target block
           const targetIndex = updated.findIndex(b => b && b.id === targetBlock.id);
           if (targetIndex !== -1) {
             // Remove from current position
             const draggedIndex = updated.findIndex(b => b && b.id === draggedBlock.id);
             if (draggedIndex !== -1) {
               updated.splice(draggedIndex, 1);
-              // Adjust target index if needed
-              const newTargetIndex = draggedIndex < targetIndex ? targetIndex - 1 : targetIndex;
+              // Always insert after the target (feels more natural for promotion)
+              const newTargetIndex = draggedIndex < targetIndex ? targetIndex : targetIndex + 1;
               updated.splice(newTargetIndex, 0, draggedBlock);
             }
           }
         }
         // Case 3: Moving top-level block to become a child
         else if (!draggedBlock.parentId && targetBlock.parentId) {
+          // PREVENT: Don't allow parent blocks with children to become children
+          if (draggedBlock.children && draggedBlock.children.length > 0) {
+            console.warn('Cannot move a parent block with children to become a child');
+            return prev.filter(block => block != null);
+          }
+
           // Set the dragged block's parent to the same as target
           draggedBlock.parentId = targetBlock.parentId;
 
@@ -2074,8 +2150,6 @@ export default function App() {
         return updated.filter(block => block != null);
       });
     }
-    // Always clean up undefined blocks as fallback
-    setDroppedBlocks(prev => prev.filter(block => block != null));
   }, []);
 
   const handleRemove = useCallback((index) => {
@@ -2104,7 +2178,7 @@ export default function App() {
       source: 'custom',
       parentId: null,        // Add this
       children: [],          // Add this
-      isExpanded: true       // Add this
+      //isExpanded: true       // Add this
     };
     
     // Add block to draft immediately
