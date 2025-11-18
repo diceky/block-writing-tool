@@ -2,7 +2,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { DndProvider, useDrag, useDrop } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
-import { Settings, RotateCcw } from 'lucide-react';
+import { Settings, RotateCcw, Copy, Check } from 'lucide-react';
 import svgPaths from "./imports/svg-n6u0l8qsx1";
 
 // Default writing blocks (empty - users start by generating their own)
@@ -220,7 +220,6 @@ Generate exactly 8 blocks with specific, actionable guidance for someone writing
             source: 'generated',
             parentId: null,        // Add this
             children: [],          // Add this
-            //isExpanded: true       // Add this
           };
         }
 
@@ -231,7 +230,6 @@ Generate exactly 8 blocks with specific, actionable guidance for someone writing
           source: 'generated',
           parentId: null,          // Add this
           children: [],            // Add this
-          //isExpanded: true         // Add this
         };
       });
     } catch (parseError) {
@@ -401,7 +399,7 @@ Generate exactly 8 blocks with specific, actionable guidance for someone writing
             source: 'generated',
             parentId: null,
             children: [],
-            //isExpanded: true
+            isDeveloped: false, // Add flag to check if this block has already been developed
           };
         }
         
@@ -412,7 +410,7 @@ Generate exactly 8 blocks with specific, actionable guidance for someone writing
           source: 'generated',
           parentId: null,
           children: [],
-          //isExpanded: true
+          isDeveloped: false, // Add flag to check if this block has already been developed
         };
       });
     } catch (parseError) {
@@ -778,16 +776,31 @@ function EditableText({ value, onSave, placeholder, className, isTitle = false, 
   const [editValue, setEditValue] = useState(value);
   const inputRef = useRef(null);
 
+  // Auto-resize function for textarea
+  const adjustTextareaHeight = useCallback(() => {
+    const textarea = inputRef.current;
+    if (textarea && !isTitle) {
+      textarea.style.height = 'auto';
+      const newHeight = Math.max(textarea.scrollHeight, 32); // Minimum 2 lines
+      textarea.style.height = `${newHeight}px`;
+    }
+  }, [isTitle]);
+
   useEffect(() => {
     if (isEditing && inputRef.current) {
       inputRef.current.focus();
       inputRef.current.select();
+      adjustTextareaHeight();
     }
-  }, [isEditing]);
+  }, [isEditing, adjustTextareaHeight]);
 
   useEffect(() => {
     setEditValue(value);
-  }, [value]);
+    // Adjust height when value changes (important for displaying long text)
+    if (!isEditing) {
+      setTimeout(adjustTextareaHeight, 0);
+    }
+  }, [value, isEditing, adjustTextareaHeight]);
 
   const handleSave = useCallback(() => {
     const trimmedValue = editValue.trim();
@@ -803,7 +816,6 @@ function EditableText({ value, onSave, placeholder, className, isTitle = false, 
   }, [value]);
 
   const handleKeyDown = useCallback((e) => {
-    // Only handle specific keys we care about, let everything else pass through
     if (e.key === 'Enter' && (isTitle || !e.shiftKey)) {
       e.preventDefault();
       handleSave();
@@ -811,7 +823,6 @@ function EditableText({ value, onSave, placeholder, className, isTitle = false, 
       e.preventDefault();
       handleCancel();
     }
-    // All other keys (including Cmd+A, Cmd+C, etc.) will be handled by the browser
   }, [isTitle, handleSave, handleCancel]);
 
   const handleClick = useCallback(() => {
@@ -823,6 +834,11 @@ function EditableText({ value, onSave, placeholder, className, isTitle = false, 
   const handleBlur = useCallback(() => {
     handleSave();
   }, [handleSave]);
+
+  const handleChange = useCallback((e) => {
+    setEditValue(e.target.value);
+    adjustTextareaHeight();
+  }, [adjustTextareaHeight]);
 
   if (isEditing) {
     if (isTitle) {
@@ -844,13 +860,13 @@ function EditableText({ value, onSave, placeholder, className, isTitle = false, 
         <textarea
           ref={inputRef}
           value={editValue}
-          onChange={(e) => setEditValue(e.target.value)}
+          onChange={handleChange}
           onKeyDown={handleKeyDown}
           onBlur={handleBlur}
-          className={`${className} w-full bg-white border border-blue-300 rounded px-1 -mx-1 resize-none min-h-[3em]`}
+          className={`${className} w-full bg-white border border-blue-300 rounded px-1 -mx-1 resize-none overflow-hidden`}
           placeholder={placeholder}
           maxLength={maxLength}
-          rows={2}
+          style={{ minHeight: '32px' }}
         />
       );
     }
@@ -859,8 +875,10 @@ function EditableText({ value, onSave, placeholder, className, isTitle = false, 
   return (
     <div
       onClick={handleClick}
-      className={`${className} cursor-pointer hover:bg-gray-100 text-black rounded px-1 -mx-1 transition-colors`}
+      ref={inputRef}
+      className={`${className} cursor-pointer hover:bg-gray-100 text-black rounded px-1 -mx-1 transition-colors whitespace-pre-wrap break-words`}
       title="Click to edit"
+      style={!isTitle ? { minHeight: '32px' } : undefined}
     >
       {value || placeholder}
     </div>
@@ -1331,7 +1349,6 @@ const wouldCreateCircularRelation = (draggedId, targetParentId) => {
 
   // State for hover tracking and expansion
   const [isHovered, setIsHovered] = useState(false);
-  //const [isExpanded, setIsExpanded] = useState(block.isExpanded ?? true);
 
   // Track when this block starts being dragged
   useEffect(() => {
@@ -1357,12 +1374,6 @@ const wouldCreateCircularRelation = (draggedId, targetParentId) => {
       onUpdate(index, { ...block, summary: newSummary });
     }
   }, [block, index, onUpdate]);
-
-  // const handleToggleExpand = () => {
-  //   const newExpanded = !isExpanded;
-  //   setIsExpanded(newExpanded);
-  //   onUpdate(index, { ...block, isExpanded: newExpanded });
-  // };
 
   return (
     <div
@@ -1401,72 +1412,72 @@ const wouldCreateCircularRelation = (draggedId, targetParentId) => {
       {/* Block content */}
       <div
         ref={drag}
-        className={`${block.parentId ? 'ml-12' : 'ml-6'} ${bgColor} rounded p-3 mb-1 cursor-move relative z-10`}
+        className={`${block.parentId ? 'ml-12' : 'ml-6'} ${bgColor} rounded mb-1 cursor-move relative z-10 flex`}
         style={{ opacity }}
       >
-        <div className="flex items-center gap-3">
-          <DragHandle />
-
-          {/* Expand/collapse button for parent blocks */}
-          {/* {!block.parentId && childBlocks.length > 0 && (
-            <button
-              onClick={handleToggleExpand}
-              className="text-gray-500 hover:text-gray-700 p-1"
-            >
-              {isExpanded ? '▼' : '▶'}
-            </button>
-          )} */}
-
-          <div className="flex-1">
-            <div className="font-['Chivo:Bold',_sans-serif] text-[14px] text-[#000000] capitalize flex items-center gap-2">
-              {!block.parentId && <span className="text-xs text-gray-500"></span>}
-              {isGeneratingTitle ? (
-                <div className="flex items-center gap-2">
-                  <div className="animate-spin rounded-full h-3 w-3 border-2 border-blue-600 border-t-transparent"></div>
-                  <span className="text-gray-500 text-[12px]">Generating title...</span>
-                </div>
-              ) : (
-                <EditableText
-                  value={block.title}
-                  onSave={handleTitleUpdate}
-                  placeholder="Block title..."
-                  className=""
-                  isTitle={true}
-                  maxLength={50}
-                />
-              )}
-            </div>
-            <div className="font-['Chivo:Regular',_sans-serif] text-[12px] text-[#666666] leading-[1.2] overflow-hidden mt-1">
-              <EditableText
-                value={block.summary}
-                onSave={handleSummaryUpdate}
-                placeholder="Block summary..."
-                className="block line-clamp-2"
-              />
-            </div>
+        {/* Number strip - only show for parent blocks */}
+        {!block.parentId && (
+          <div className="w-8 bg-gray-50 border-r border-gray-200 flex items-start justify-center pt-3 text-[10px] font-['Chivo:Regular',_sans-serif] text-gray-500 rounded-l">
+            {droppedBlocks.filter(b => b && !b.parentId).findIndex(b => b.id === block.id) + 1}
           </div>
+        )}
 
-          {/* Existing buttons */}
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => onRegenerate && onRegenerate(index)}
-              disabled={isRegenerating}
-              className="text-blue-500 hover:text-blue-700 p-1 disabled:text-gray-400 disabled:cursor-not-allowed"
-              title="Regenerate this block's expansion"
-            >
-              {isRegenerating ? (
-                <div className="animate-spin rounded-full h-4 w-4 border-2 border-blue-600 border-t-transparent"></div>
-              ) : (
-                <RotateCcw size={16} />
-              )}
-            </button>
-            <button
-              onClick={() => onRemove(index)}
-              className="text-red-500 hover:text-red-700 p-1"
-              title="Remove block"
-            >
-              ×
-            </button>
+        {/* Content */}
+        <div className="flex-1 p-3">
+          <div className="flex items-center gap-3">
+            <DragHandle />
+
+            <div className="flex-1">
+              <div className="font-['Chivo:Bold',_sans-serif] text-[14px] text-[#000000] capitalize flex items-center gap-2">
+                {!block.parentId && <span className="text-xs text-gray-500"></span>}
+                {isGeneratingTitle ? (
+                  <div className="flex items-center gap-2">
+                    <div className="animate-spin rounded-full h-3 w-3 border-2 border-blue-600 border-t-transparent"></div>
+                    <span className="text-gray-500 text-[12px]">Generating title...</span>
+                  </div>
+                ) : (
+                  <EditableText
+                    value={block.title}
+                    onSave={handleTitleUpdate}
+                    placeholder="Block title..."
+                    className=""
+                    isTitle={true}
+                    maxLength={50}
+                  />
+                )}
+              </div>
+              <div className="font-['Chivo:Regular',_sans-serif] text-[12px] text-[#666666] leading-[1.2] overflow-hidden mt-1">
+                <EditableText
+                  value={block.summary}
+                  onSave={handleSummaryUpdate}
+                  placeholder="Block summary..."
+                  className="block line-clamp-2"
+                />
+              </div>
+            </div>
+
+            {/* Existing buttons */}
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => onRegenerate && onRegenerate(index)}
+                disabled={isRegenerating}
+                className="text-blue-500 hover:text-blue-700 p-1 disabled:text-gray-400 disabled:cursor-not-allowed"
+                title="Regenerate this block's expansion"
+              >
+                {isRegenerating ? (
+                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-blue-600 border-t-transparent"></div>
+                ) : (
+                  <RotateCcw size={16} />
+                )}
+              </button>
+              <button
+                onClick={() => onRemove(index)}
+                className="text-red-500 hover:text-red-700 p-1"
+                title="Remove block"
+              >
+                ×
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -1856,6 +1867,7 @@ export default function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [regeneratingBlocks, setRegeneratingBlocks] = useState(new Set()); // Track which blocks are being regenerated
   const [nextBlockId, setNextBlockId] = useState(1000); // Start custom blocks at ID 1000
+  const [copiedToClipboard, setCopiedToClipboard] = useState(false);
 
   //const [openaiApiKey, setOpenaiApiKey] = useState('');
   const [error, setError] = useState('');
@@ -1973,7 +1985,7 @@ export default function App() {
       id: item.id || Date.now(),
       parentId: dropTarget?.type === 'child-zone' ? dropTarget.parentId : null,
       children: [],
-      //isExpanded: true
+      isDeveloped: false, // Add flag to check if this block has already been developed
     };
 
     setDroppedBlocks(prev => {
@@ -2178,7 +2190,7 @@ export default function App() {
       source: 'custom',
       parentId: null,        // Add this
       children: [],          // Add this
-      //isExpanded: true       // Add this
+      isDeveloped: false, // Add flag to check if this block has already been developed
     };
     
     // Add block to draft immediately
@@ -2238,18 +2250,19 @@ export default function App() {
     setError('');
     
     try {
-      const expandedArray = await expandTextWithOpenAI(droppedBlocks, currentTopic);
-      setExpandedTextArray(expandedArray);
-      //setFullText(expandedArray.join('\n\n'));
+      const expanded = await expandTextWithOpenAI(droppedBlocks, currentTopic);
+      setExpandedTextArray(expanded);
+
+      // Mark all parent blocks as developed
+      setDroppedBlocks(prev => prev.map(block => {
+        if (block && (block.parentId === null || block.parentId === undefined)) {
+          return { ...block, isDeveloped: true };
+        }
+        return block;
+      }));
     } catch (error) {
-      console.error('Error expanding text:', error);
-      setError(error.message);
-      
-      // Final fallback to original text
-      const blockTexts = droppedBlocks.map(block => block.summary);
-      setExpandedTextArray(blockTexts);
-      //setFullText(blockTexts.join('\n\n'));
-      setError('OpenAI failed, showing original text: ' + error.message);
+      console.error('Error developing text:', error);
+      setError(`Failed to develop text: ${error.message}`);
     } finally {
       setIsGenerating(false);
     }
@@ -2361,25 +2374,36 @@ Respond with only the expanded paragraph, no additional commentary or formatting
         block && (block.parentId === null || block.parentId === undefined)
       );
 
-      let expandedTextIndex = -1;
-
       // Always find the parent block's position in the expanded text array
       const targetParentBlock = parentBlockForRegeneration || blockToRegenerate;
-      expandedTextIndex = parentBlocks.findIndex(block => block.id === targetParentBlock.id);
+      const expandedTextIndex = parentBlocks.findIndex(block => block.id === targetParentBlock.id);
 
       if (expandedTextIndex !== -1) {
-        // Update the expanded text array at the correct position
-        setExpandedTextArray(prev => {
-          const newArray = [...prev];
+        // CHANGED: Check if this block has been developed before
+        if (targetParentBlock.isDeveloped) {
+          // Block was already developed - UPDATE at the position
+          setExpandedTextArray(prev => {
+            const newArray = [...prev];
+            // Ensure array is large enough
+            while (newArray.length <= expandedTextIndex) {
+              newArray.push('');
+            }
+            newArray[expandedTextIndex] = newExpansion;
+            return newArray;
+          });
+        } else {
+          // Block is NEW and hasn't been developed yet - INSERT at position
+          setExpandedTextArray(prev => {
+            const newArray = [...prev];
+            newArray.splice(expandedTextIndex, 0, newExpansion);
+            return newArray;
+          });
 
-          // Ensure array is large enough
-          while (newArray.length <= expandedTextIndex) {
-            newArray.push('');
-          }
-
-          newArray[expandedTextIndex] = newExpansion;
-          return newArray;
-        });
+          // Mark the block as developed
+          setDroppedBlocks(prev => prev.map(block =>
+            block.id === targetParentBlock.id ? { ...block, isDeveloped: true } : block
+          ));
+        }
       } else {
         console.warn('Could not find correct position for regenerated block');
       }
@@ -2396,6 +2420,25 @@ Respond with only the expanded paragraph, no additional commentary or formatting
       });
     }
   }, [droppedBlocks, openaiConnected, currentTopic]);
+
+  const handleCopyToClipboard = useCallback(async () => {
+    if (expandedTextArray.length === 0) return;
+
+    const fullText = expandedTextArray.join('\n\n').trim();
+
+    try {
+      await navigator.clipboard.writeText(fullText);
+      setCopiedToClipboard(true);
+
+      // Reset the feedback after 2 seconds
+      setTimeout(() => {
+        setCopiedToClipboard(false);
+      }, 2000);
+    } catch (error) {
+      console.error('Failed to copy to clipboard:', error);
+      setError('Failed to copy text to clipboard');
+    }
+  }, [expandedTextArray]);
 
   return (
     <DndProvider backend={HTML5Backend}>
@@ -2537,8 +2580,21 @@ Respond with only the expanded paragraph, no additional commentary or formatting
                   Developed Text
                 </h4>
                 {expandedTextArray.length > 0 && (
-                  <div className="font-['Chivo:Regular',_sans-serif] text-[12px] text-[#666666]">
-                    {expandedTextArray.join('\n\n').trim().split(/\s+/).filter(word => word.length > 0).length} words
+                  <div className="flex items-center gap-2">
+                    <div className="font-['Chivo:Regular',_sans-serif] text-[12px] text-[#666666]">
+                      {expandedTextArray.join('\n\n').trim().split(/\s+/).filter(word => word.length > 0).length} words
+                    </div>
+                    <button
+                      onClick={handleCopyToClipboard}
+                      className="p-1.5 rounded hover:bg-gray-100 transition-colors text-gray-600 hover:text-blue-600"
+                      title="Copy to clipboard"
+                    >
+                      {copiedToClipboard ? (
+                        <Check size={16} className="text-green-600" />
+                      ) : (
+                        <Copy size={16} />
+                      )}
+                    </button>
                   </div>
                 )}
               </div>
