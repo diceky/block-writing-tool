@@ -886,7 +886,7 @@ function EditableText({ value, onSave, placeholder, className, isTitle = false, 
 }
 
 // Topic Input Component
-function TopicInput({ onGenerateBlocks, isGenerating, openaiConnected }) {
+function TopicInput({ onGenerateBlocks, isGenerating, openaiConnected, mode }) {
   const [topic, setTopic] = useState('');
   const textareaRef = useRef(null);
 
@@ -939,13 +939,13 @@ function TopicInput({ onGenerateBlocks, isGenerating, openaiConnected }) {
   return (
     <div className="bg-[rgba(248,248,248,1)] rounded-lg p-4 mb-6">
       <h3 className="font-['Chivo:Bold',_sans-serif] text-[16px] text-[#000000] mb-3">
-        Generate Writing Blocks for Your Topic
+        {mode==="ai-only" ? "Generate Your Writing" : "Generate Writing Blocks for Your Topic"}
       </h3>
       
       <div className="flex gap-2 items-end">
         <div className="flex-1">
           <label className="block font-['Chivo:Regular',_sans-serif] text-[12px] text-[#666666] mb-1">
-            What would you like to write about?
+            {mode==="ai-only" ? "Write your prompt here" : "What would you like to write about?"}
           </label>
           <textarea
             ref={textareaRef}
@@ -964,7 +964,7 @@ function TopicInput({ onGenerateBlocks, isGenerating, openaiConnected }) {
           disabled={!canGenerate}
           className="bg-[#1b00b6] text-white px-4 py-2 rounded hover:bg-blue-800 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed font-['Chivo:Bold',_sans-serif] text-[12px] h-fit"
         >
-          {isGenerating ? 'Generating...' : 'Generate Blocks'}
+          {isGenerating ? 'Generating...' : (mode==="ai-only" ? "Generate" : "Generate Blocks")}
         </button>
       </div>
       
@@ -1880,6 +1880,10 @@ export default function App() {
   const [openaiConnected, setOpenaiConnected] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
 
+  // States for writing mode
+  const [writingMode, setWritingMode] = useState('block'); // 'block' | 'manual' | 'ai-only'
+  const [manualText, setManualText] = useState(''); // For manual writing mode
+
   // Auto-connect when app loads
   useEffect(() => {
     const autoConnect = async () => {
@@ -1895,6 +1899,51 @@ export default function App() {
     
     autoConnect();
   }, []);
+
+  // Add handler for AI-only mode
+  const handleAIOnlyGenerate = useCallback(async (prompt) => {
+    if (!openaiConnected) {
+      setError('Please connect to OpenAI in the settings above.');
+      return;
+    }
+    
+    setIsGenerating(true);
+    setError('');
+    
+    try {
+      const response = await fetch('/.netlify/functions/chat-completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o',
+          prompt: prompt,
+          maxTokens: 4000,
+          temperature: 0.7
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+        throw new Error('Invalid response format from OpenAI API');
+      }
+
+      const aiResponse = data.choices[0].message.content.trim();
+      setExpandedTextArray([aiResponse]);
+    } catch (error) {
+      console.error('Error generating AI response:', error);
+      setError(`Failed to generate response: ${error.message}`);
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [openaiConnected]);
 
   // Helper functions to work with hierarchy
   const getParentBlocks = useCallback(() => {
@@ -2449,17 +2498,49 @@ Respond with only the expanded paragraph, no additional commentary or formatting
             <div className="font-['Chivo:Bold',_sans-serif] not-italic text-[#000000] text-left text-[32px] mb-4">
               <p className="block leading-[normal]">Let's prototype your writing</p>
             </div>
-            <button
-              onClick={() => setShowSettings(!showSettings)}
-              className={`p-2 rounded-md transition-colors ${
-                openaiConnected
-                  ? 'text-green-600 hover:text-green-800 hover:bg-green-100'
-                  : 'text-gray-600 hover:text-gray-800 hover:bg-gray-100'
-              }`}
-              title="Settings"
-            >
-              <Settings size={20} />
-            </button>
+            <div className="flex items-center gap-4">
+              {/* Writing Mode Selector */}
+              <div className="flex gap-2 bg-gray-100 rounded-lg p-1">
+                <button
+                  onClick={() => setWritingMode('block')}
+                  className={`px-3 py-1.5 rounded text-[12px] font-['Chivo:Bold',_sans-serif] transition-colors ${writingMode === 'block'
+                      ? 'bg-white text-blue-600 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-800'
+                    }`}
+                >
+                  Block Mode
+                </button>
+                <button
+                  onClick={() => setWritingMode('ai-only')}
+                  className={`px-3 py-1.5 rounded text-[12px] font-['Chivo:Bold',_sans-serif] transition-colors ${writingMode === 'ai-only'
+                      ? 'bg-white text-blue-600 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-800'
+                    }`}
+                >
+                  AI Only
+                </button>
+                <button
+                  onClick={() => setWritingMode('manual')}
+                  className={`px-3 py-1.5 rounded text-[12px] font-['Chivo:Bold',_sans-serif] transition-colors ${writingMode === 'manual'
+                      ? 'bg-white text-blue-600 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-800'
+                    }`}
+                >
+                  Manual
+                </button>
+              </div>
+
+              <button
+                onClick={() => setShowSettings(!showSettings)}
+                className={`p-2 rounded-md transition-colors ${openaiConnected
+                    ? 'text-green-600 hover:text-green-800 hover:bg-green-100'
+                    : 'text-gray-600 hover:text-gray-800 hover:bg-gray-100'
+                  }`}
+                title="Settings"
+              >
+                <Settings size={20} />
+              </button>
+            </div>
           </div>
 
           {/* AI Settings Panel */}
@@ -2476,137 +2557,228 @@ Respond with only the expanded paragraph, no additional commentary or formatting
             </div>
           )}
 
-          {/* Full-width top section */}
-          <div className="space-y-6 mb-8">
-            {/* Topic Input */}
-            <TopicInput
-              onGenerateBlocks={handleGenerateBlocks}
-              isGenerating={isGeneratingBlocks}
-              openaiConnected={openaiConnected}
-            />
+          {/* Block Writing Mode */}
+          {writingMode === 'block' && (
+            <>
+              {/* Full-width top section */}
+              <div className="space-y-6 mb-8">
+                {/* Topic Input */}
+                <TopicInput
+                  onGenerateBlocks={handleGenerateBlocks}
+                  isGenerating={isGeneratingBlocks}
+                  openaiConnected={openaiConnected}
+                  mode="block"
+                />
 
-            {/* Writing blocks grid */}
-            <div className="w-full">
-              {/* Show existing blocks if they exist */}
-              {writingBlocks.length > 0 && (
-                <>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 mb-2">
-                    {writingBlocks.slice(0, 8).map((block) => (
-                      <WritingBlock key={block.id} block={block} onUpdate={handleUpdateBlock} />
-                    ))}
-                  </div>
-                  {writingBlocks.length > 8 && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 mb-2">
-                      {writingBlocks.slice(8, 16).map((block) => (
-                        <WritingBlock key={block.id} block={block} onUpdate={handleUpdateBlock} />
-                      ))}
-                    </div>
-                  )}
-                  {writingBlocks.length > 16 && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 mb-2">
-                      {writingBlocks.slice(16).map((block) => (
-                        <WritingBlock key={block.id} block={block} onUpdate={handleUpdateBlock} />
-                      ))}
-                    </div>
-                  )}
-                  
-                  {/* Generate more blocks button - centered beneath the blocks */}
-                  {writingBlocks.length > 0 && currentTopic && (
-                    <div className="flex justify-center mt-4 mb-4">
-                      <button
-                        onClick={handleGenerateMoreBlocks}
-                        disabled={isGeneratingBlocks || !openaiConnected}
-                        className="bg-[rgba(246,246,246,1)] hover:bg-gray-200 text-gray-700 px-4 py-2 rounded border border-gray-300 transition-colors disabled:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed font-['Chivo:Regular',_sans-serif] text-[10px]"
-                        title="Generate 8 additional blocks for the same topic"
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="text-[12px] text-[rgba(255,255,255,1)]">➕</span>
-                          <span className="text-[11px] text-left font-bold text-[rgba(77,77,77,1)]">Generate more</span>
+                {/* Writing blocks grid */}
+                <div className="w-full">
+                  {writingBlocks.length > 0 && (
+                    <>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 mb-2">
+                        {writingBlocks.slice(0, 8).map((block) => (
+                          <WritingBlock key={block.id} block={block} onUpdate={handleUpdateBlock} />
+                        ))}
+                      </div>
+                      {writingBlocks.length > 8 && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 mb-2">
+                          {writingBlocks.slice(8, 16).map((block) => (
+                            <WritingBlock key={block.id} block={block} onUpdate={handleUpdateBlock} />
+                          ))}
                         </div>
+                      )}
+                      {writingBlocks.length > 16 && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 mb-2">
+                          {writingBlocks.slice(16).map((block) => (
+                            <WritingBlock key={block.id} block={block} onUpdate={handleUpdateBlock} />
+                          ))}
+                        </div>
+                      )}
+
+                      {writingBlocks.length > 0 && currentTopic && (
+                        <div className="flex justify-center mt-4 mb-4">
+                          <button
+                            onClick={handleGenerateMoreBlocks}
+                            disabled={isGeneratingBlocks || !openaiConnected}
+                            className="bg-[rgba(246,246,246,1)] hover:bg-gray-200 text-gray-700 px-4 py-2 rounded border border-gray-300 transition-colors disabled:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed font-['Chivo:Regular',_sans-serif] text-[10px]"
+                            title="Generate 8 additional blocks for the same topic"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="text-[12px] text-[rgba(255,255,255,1)]">➕</span>
+                              <span className="text-[11px] text-left font-bold text-[rgba(77,77,77,1)]">Generate more</span>
+                            </div>
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {isGeneratingBlocks && writingBlocks.length > 0 && (
+                    <div className="flex items-center justify-center py-8">
+                      <LoadingSpinner message="Generating more blocks..." />
+                    </div>
+                  )}
+
+                  {isGeneratingBlocks && writingBlocks.length === 0 && (
+                    <div className="flex items-center justify-center py-12">
+                      <LoadingSpinner message={`Generating blocks for "${currentTopic}"...`} />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Two-column layout */}
+              <div className="grid grid-cols-2 gap-8">
+                {/* Left Column - Text Editor and Develop Button */}
+                <div>
+                  <h4 className="font-['Chivo:Bold',_sans-serif] text-[14px] text-[#000000] mb-3">
+                    Your Writing Draft
+                  </h4>
+                  <TextEditor
+                    droppedBlocks={droppedBlocks}
+                    onDrop={handleDrop}
+                    onMove={handleMove}
+                    onRemove={handleRemove}
+                    onTextChange={handleTextChange}
+                    customText={customText}
+                    onAddCustomBlock={handleAddCustomBlock}
+                    onUpdateDroppedBlock={handleUpdateDroppedBlock}
+                    generatingTitleForBlocks={generatingTitleForBlocks}
+                    onRegenerateBlock={handleRegenerateBlock}
+                    regeneratingBlocks={regeneratingBlocks}
+                  />
+                  <DevelopTextButton
+                    droppedBlocks={droppedBlocks}
+                    onDevelopText={handleDevelopText}
+                    isGenerating={isGenerating}
+                    openaiConnected={openaiConnected}
+                  />
+                </div>
+
+                {/* Right Column - Developed Text */}
+                <div>
+                  <div className="flex justify-between items-center mb-3">
+                    <h4 className="font-['Chivo:Bold',_sans-serif] text-[14px] text-[#000000]">
+                      Developed Text
+                    </h4>
+                    {expandedTextArray.length > 0 && (
+                      <div className="flex items-center gap-2">
+                        <div className="font-['Chivo:Regular',_sans-serif] text-[12px] text-[#666666]">
+                          {expandedTextArray.join('\n\n').trim().split(/\s+/).filter(word => word.length > 0).length} words
+                        </div>
+                        <button
+                          onClick={handleCopyToClipboard}
+                          className="p-1.5 rounded hover:bg-gray-100 transition-colors text-gray-600 hover:text-blue-600"
+                          title="Copy to clipboard"
+                        >
+                          {copiedToClipboard ? (
+                            <Check size={16} className="text-green-600" />
+                          ) : (
+                            <Copy size={16} />
+                          )}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <DevelopedTextPanel
+                    expandedTextArray={expandedTextArray}
+                    onTextChange={setExpandedTextArray}
+                    isGenerating={isGenerating}
+                  />
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Manual Writing Mode */}
+          {writingMode === 'manual' && (
+            <div className="max-w-4xl mx-auto">
+              <div className="flex justify-between items-center mb-3">
+                <h4 className="font-['Chivo:Bold',_sans-serif] text-[14px] text-[#000000]">
+                  Manual Writing
+                </h4>
+                <div className="flex items-center gap-2">
+                  <div className="font-['Chivo:Regular',_sans-serif] text-[12px] text-[#666666]">
+                    {manualText.trim().split(/\s+/).filter(word => word.length > 0).length} words
+                  </div>
+                  <button
+                    onClick={async () => {
+                      if (!manualText.trim()) return;
+                      try {
+                        await navigator.clipboard.writeText(manualText);
+                        setCopiedToClipboard(true);
+                        setTimeout(() => setCopiedToClipboard(false), 2000);
+                      } catch (error) {
+                        console.error('Failed to copy to clipboard:', error);
+                        setError('Failed to copy text to clipboard');
+                      }
+                    }}
+                    className="p-1.5 rounded hover:bg-gray-100 transition-colors text-gray-600 hover:text-blue-600"
+                    title="Copy to clipboard"
+                  >
+                    {copiedToClipboard ? (
+                      <Check size={16} className="text-green-600" />
+                    ) : (
+                      <Copy size={16} />
+                    )}
+                  </button>
+                </div>
+              </div>
+              <textarea
+                value={manualText}
+                onChange={(e) => setManualText(e.target.value)}
+                className="w-full min-h-[600px] p-6 border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 font-['Chivo:Regular',_sans-serif] text-[14px] leading-6"
+                placeholder="Start writing your text here..."
+              />
+            </div>
+          )}
+
+          {/* AI-Only Mode */}
+          {writingMode === 'ai-only' && (
+            <>
+              {/* AI Prompt Input - Full Width */}
+              <div className="mb-6">
+                <TopicInput
+                  onGenerateBlocks={handleAIOnlyGenerate}
+                  isGenerating={isGenerating}
+                  openaiConnected={openaiConnected}
+                  mode="ai-only"
+                />
+              </div>
+
+              {/* AI Response - Centered with max width */}
+              <div className="max-w-4xl mx-auto">
+                <div className="flex justify-between items-center mb-3">
+                  <h4 className="font-['Chivo:Bold',_sans-serif] text-[14px] text-[#000000]">
+                    AI Response
+                  </h4>
+                  {expandedTextArray.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <div className="font-['Chivo:Regular',_sans-serif] text-[12px] text-[#666666]">
+                        {expandedTextArray.join('\n\n').trim().split(/\s+/).filter(word => word.length > 0).length} words
+                      </div>
+                      <button
+                        onClick={handleCopyToClipboard}
+                        className="p-1.5 rounded hover:bg-gray-100 transition-colors text-gray-600 hover:text-blue-600"
+                        title="Copy to clipboard"
+                      >
+                        {copiedToClipboard ? (
+                          <Check size={16} className="text-green-600" />
+                        ) : (
+                          <Copy size={16} />
+                        )}
                       </button>
                     </div>
                   )}
-                </>
-              )}
-
-              {/* Show spinner when generating additional blocks (underneath existing blocks) */}
-              {isGeneratingBlocks && writingBlocks.length > 0 && (
-                <div className="flex items-center justify-center py-8">
-                  <LoadingSpinner message="Generating more blocks..." />
                 </div>
-              )}
-
-              {/* Show full loading state only when no blocks exist */}
-              {isGeneratingBlocks && writingBlocks.length === 0 && (
-                <div className="flex items-center justify-center py-12">
-                  <LoadingSpinner message={`Generating blocks for "${currentTopic}"...`} />
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Two-column layout */}
-          <div className="grid grid-cols-2 gap-8">
-            {/* Left Column - Text Editor and Develop Button */}
-            <div>
-              <h4 className="font-['Chivo:Bold',_sans-serif] text-[14px] text-[#000000] mb-3">
-                Your Writing Draft
-              </h4>
-              <TextEditor
-                droppedBlocks={droppedBlocks}
-                onDrop={handleDrop}
-                onMove={handleMove}
-                onRemove={handleRemove}
-                onTextChange={handleTextChange}
-                customText={customText}
-                onAddCustomBlock={handleAddCustomBlock}
-                onUpdateDroppedBlock={handleUpdateDroppedBlock}
-                generatingTitleForBlocks={generatingTitleForBlocks}
-                onRegenerateBlock={handleRegenerateBlock}
-                regeneratingBlocks={regeneratingBlocks}
-              />
-              <DevelopTextButton
-                droppedBlocks={droppedBlocks}
-                onDevelopText={handleDevelopText}
-                isGenerating={isGenerating}
-                openaiConnected={openaiConnected}
-              />
-            </div>
-
-            {/* Right Column - Developed Text */}
-            <div>
-              <div className="flex justify-between items-center mb-3">
-                <h4 className="font-['Chivo:Bold',_sans-serif] text-[14px] text-[#000000]">
-                  Developed Text
-                </h4>
-                {expandedTextArray.length > 0 && (
-                  <div className="flex items-center gap-2">
-                    <div className="font-['Chivo:Regular',_sans-serif] text-[12px] text-[#666666]">
-                      {expandedTextArray.join('\n\n').trim().split(/\s+/).filter(word => word.length > 0).length} words
-                    </div>
-                    <button
-                      onClick={handleCopyToClipboard}
-                      className="p-1.5 rounded hover:bg-gray-100 transition-colors text-gray-600 hover:text-blue-600"
-                      title="Copy to clipboard"
-                    >
-                      {copiedToClipboard ? (
-                        <Check size={16} className="text-green-600" />
-                      ) : (
-                        <Copy size={16} />
-                      )}
-                    </button>
-                  </div>
-                )}
+                <DevelopedTextPanel
+                  expandedTextArray={expandedTextArray}
+                  onTextChange={setExpandedTextArray}
+                  isGenerating={isGenerating}
+                />
               </div>
-              <DevelopedTextPanel
-                expandedTextArray={expandedTextArray}
-                onTextChange={setExpandedTextArray}
-                isGenerating={isGenerating}
-              />
-            </div>
-          </div>
+            </>
+          )}
         </div>
-        {/* <div className="absolute border border-[#a8a8a8] border-solid inset-0 pointer-events-none rounded-[20px]" /> */}
       </div>
     </DndProvider>
   );
