@@ -886,7 +886,7 @@ function EditableText({ value, onSave, placeholder, className, isTitle = false, 
 }
 
 // Topic Input Component
-function TopicInput({ onGenerateBlocks, isGenerating, openaiConnected, mode }) {
+const TopicInput = React.forwardRef(function TopicInput({ onGenerateBlocks, isGenerating, openaiConnected, mode }, ref) {
   const [topic, setTopic] = useState('');
   const textareaRef = useRef(null);
 
@@ -894,17 +894,14 @@ function TopicInput({ onGenerateBlocks, isGenerating, openaiConnected, mode }) {
   const adjustTextareaHeight = useCallback(() => {
     const textarea = textareaRef.current;
     if (textarea) {
-      // Reset height to auto to get the correct scrollHeight
       textarea.style.height = 'auto';
-      // Set height to scrollHeight or minimum 3 lines
-      const lineHeight = 24; // Approximate line height
-      const minHeight = lineHeight * 3; // 3 lines minimum
+      const lineHeight = 24;
+      const minHeight = lineHeight * 3;
       const newHeight = Math.max(textarea.scrollHeight, minHeight);
       textarea.style.height = `${newHeight}px`;
     }
   }, []);
 
-  // Adjust height when component mounts and when topic changes
   useEffect(() => {
     adjustTextareaHeight();
   }, [topic, adjustTextareaHeight]);
@@ -920,24 +917,21 @@ function TopicInput({ onGenerateBlocks, isGenerating, openaiConnected, mode }) {
   };
 
   const handleKeyDown = useCallback((e) => {
-    // Only handle Enter key for generation, let browser handle all other keys
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleGenerate();
     }
-    // All other keys (including Cmd+A, Cmd+C, etc.) will be handled by the browser
   }, [handleGenerate]);
 
   const handleChange = (e) => {
     setTopic(e.target.value);
-    // Adjust height after state update
     setTimeout(adjustTextareaHeight, 0);
   };
 
   const canGenerate = topic.trim() && !isGenerating;
 
   return (
-    <div className="bg-[rgba(248,248,248,1)] rounded-lg p-4 mb-6">
+    <div ref={ref} className="bg-[rgba(248,248,248,1)] rounded-lg p-4 mb-6">
       <h3 className="font-['Chivo:Bold',_sans-serif] text-[16px] text-[#000000] mb-3">
         {mode==="ai-only" ? "Generate Your Writing" : "Generate Writing Blocks for Your Topic"}
       </h3>
@@ -975,100 +969,7 @@ function TopicInput({ onGenerateBlocks, isGenerating, openaiConnected, mode }) {
       </div>
     </div>
   );
-}
-
-function AISettingsPanel({ onConnectionChange }) {
-  const [isConnected, setIsConnected] = useState(false);
-  const [isConnecting, setIsConnecting] = useState(false);
-  const [connectionError, setConnectionError] = useState('');
-
-  useEffect(() => {
-    if (onConnectionChange) {
-      onConnectionChange(isConnected);
-    }
-  }, [isConnected, onConnectionChange]);
-
-  const handleConnect = async () => {
-    setIsConnecting(true);
-    setConnectionError('');
-
-    try {
-      await testOpenAIConnection();
-      setIsConnected(true);
-      setConnectionError('');
-    } catch (error) {
-      setConnectionError(error.message);
-      setIsConnected(false);
-    } finally {
-      setIsConnecting(false);
-    }
-  };
-
-  return (
-    <div className="bg-gray-50 rounded-lg p-4 mb-6 border border-gray-200">
-      <h3 className="font-['Chivo:Bold',_sans-serif] text-[16px] text-[#000000] mb-3">OpenAI Connection</h3>
-      
-      <div className="flex flex-col gap-3">
-        <div className="flex items-center gap-4">
-          <span className="font-['Chivo:Regular',_sans-serif] text-[14px] text-[#000000]">
-            ChatGPT Integration
-          </span>
-          {isConnected ? (
-            <span className="bg-green-100 text-green-800 text-[10px] px-2 py-1 rounded-full font-['Chivo:Bold',_sans-serif]">
-              Connected
-            </span>
-          ) : (
-            <button
-              type="button"
-              onClick={handleConnect}
-              disabled={isConnecting}
-              className="bg-[#1b00b6] text-white px-4 py-2 rounded hover:bg-blue-800 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed font-['Chivo:Bold',_sans-serif] text-[12px]"
-            >
-              {isConnecting ? 'Connecting...' : 'Test Connection'}
-            </button>
-          )}
-        </div>
-
-        {connectionError && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded">
-            <p className="font-['Chivo:Regular',_sans-serif] text-[12px]">
-              Connection failed: {connectionError}
-            </p>
-          </div>
-        )}
-        
-        <div className="text-[12px] text-gray-600 font-['Chivo:Regular',_sans-serif]">
-          <p>• API key is configured server-side for security</p>
-          <p>• Uses GPT-4o models for high-quality results</p>
-          <p>• No API key storage or exposure in browser</p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Drag handle component (preserved from Figma design)
-function DragHandle() {
-  return (
-    <div className="h-3 relative shrink-0 w-[6.857px]">
-      <svg
-        className="block size-full"
-        fill="none"
-        preserveAspectRatio="none"
-        viewBox="0 0 7 12"
-      >
-        <g>
-          <circle cx="0.857143" cy="0.857143" fill="#808080" r="0.857143" />
-          <circle cx="0.857143" cy="5.99985" fill="#808080" r="0.857143" />
-          <circle cx="0.857143" cy="11.1429" fill="#808080" r="0.857143" />
-          <circle cx="6" cy="0.857143" fill="#808080" r="0.857143" />
-          <circle cx="6" cy="5.99985" fill="#808080" r="0.857143" />
-          <circle cx="6" cy="11.1429" fill="#808080" r="0.857143" />
-        </g>
-      </svg>
-    </div>
-  );
-}
+})
 
 // Collaboration cursor indicator
 function WriterCursor({ isVisible, position, userName = "Writer 1" }) {
@@ -1117,6 +1018,17 @@ function LoadingSpinner({ message }) {
       <span className="text-sm text-gray-600 flex-1 text-center">
         {message || 'ChatGPT is working...'}
       </span>
+    </div>
+  );
+}
+
+// Drop line indicator used in editor reordering
+function DropLineIndicator({ isVisible, position }) {
+  if (!isVisible) return null;
+  const posClass = position === 'above' ? '-top-2' : '-bottom-2';
+  return (
+    <div className={`absolute ${posClass} left-0 right-0 h-[2px] z-20`}>
+      <div className="h-[2px] bg-blue-500" />
     </div>
   );
 }
@@ -1218,6 +1130,19 @@ function DroppedBlock({
     },
   });
 
+  // Helper function to check circular relationships (hoisted)
+  function wouldCreateCircularRelation(draggedId, targetParentId) {
+    if (!draggedId || !targetParentId) return false;
+    let currentBlock = droppedBlocks.find(b => b && b.id === targetParentId);
+    while (currentBlock && currentBlock.parentId) {
+      if (currentBlock.parentId === draggedId) {
+        return true;
+      }
+      currentBlock = droppedBlocks.find(b => b && b.id === currentBlock.parentId);
+    }
+    return false;
+  }
+
   // Separate drop zones for reordering
   const [{ isOver: isOverTop }, dropTop] = useDrop({
     accept: 'dropped-block',
@@ -1288,32 +1213,13 @@ function DroppedBlock({
     accept: ['block', 'dropped-block'],
     drop: (item, monitor) => {
       if (!monitor.didDrop()) {
-        // Prevent dropping a block into its own child zone
-        if (item.id === block.id) {
-          return;
-        }
+        if (item.id === block.id) return;
 
-        // Find the dragged block to check if it has children
         const draggedBlock = droppedBlocks.find(b => b && b.id === item.id);
-
-        // Prevent dropping parent blocks with children into child zones
         if (draggedBlock && draggedBlock.children && draggedBlock.children.length > 0) {
           console.warn('Cannot drop a parent block with children into a child zone');
           return;
         }
-
-        // Prevent creating circular relationships - check if the block being dropped
-        // is already a parent of the target block
-        const wouldCreateCircularRelation = (draggedId, targetParentId) => {
-          let currentBlock = droppedBlocks.find(b => b && b.id === targetParentId);
-          while (currentBlock && currentBlock.parentId) {
-            if (currentBlock.parentId === draggedId) {
-              return true;
-            }
-            currentBlock = droppedBlocks.find(b => b && b.id === currentBlock.parentId);
-          }
-          return false;
-        };
 
         if (!wouldCreateCircularRelation(item.id, block.id)) {
           onMove(item, { type: 'child-zone', parentId: block.id });
@@ -1326,26 +1232,13 @@ function DroppedBlock({
 
       return {
         isOver: monitor.isOver({ shallow: true }) &&
-          draggedItem?.id !== block.id && // Don't show hover state for self
-          !wouldCreateCircularRelation(draggedItem?.id, block.id) && // Don't show hover for circular drops
-          !(draggedBlock && draggedBlock.children && draggedBlock.children.length > 0), // Don't show hover for parent blocks with children
+          draggedItem?.id !== block.id &&
+          !wouldCreateCircularRelation(draggedItem?.id, block.id) &&
+          !(draggedBlock && draggedBlock.children && draggedBlock.children.length > 0),
       };
     },
   });
 
-  // Helper function to check circular relationships
-const wouldCreateCircularRelation = (draggedId, targetParentId) => {
-  if (!draggedId || !targetParentId) return false;
-  
-  let currentBlock = droppedBlocks.find(b => b && b.id === targetParentId);
-  while (currentBlock && currentBlock.parentId) {
-    if (currentBlock.parentId === draggedId) {
-      return true;
-    }
-    currentBlock = droppedBlocks.find(b => b && b.id === currentBlock.parentId);
-  }
-  return false;
-};
 
   // State for hover tracking and expansion
   const [isHovered, setIsHovered] = useState(false);
@@ -1546,7 +1439,10 @@ const wouldCreateCircularRelation = (draggedId, targetParentId) => {
 }
 
 // Text editing area with drop zone
-function TextEditor({ droppedBlocks, onDrop, onMove, onRemove, onTextChange, customText, onAddCustomBlock, onUpdateDroppedBlock, generatingTitleForBlocks, onRegenerateBlock, regeneratingBlocks }) {
+const TextEditor = React.forwardRef(function TextEditor(
+  { droppedBlocks, onDrop, onMove, onRemove, onTextChange, customText, onAddCustomBlock, onUpdateDroppedBlock, generatingTitleForBlocks, onRegenerateBlock, regeneratingBlocks },
+  ref
+) {
   const [{ isOver }, drop] = useDrop({
     accept: ['block', 'dropped-block'],
     drop: (item, monitor) => {
@@ -1658,12 +1554,9 @@ function TextEditor({ droppedBlocks, onDrop, onMove, onRemove, onTextChange, cus
   );
 
   return (
-    <div className="bg-[#ffffff] min-h-[400px] w-full border border-gray-200 rounded-lg">
+    <div ref={ref} className="bg-[#ffffff] min-h-[400px] w-full border border-gray-200 rounded-lg">
       <div className="min-h-[400px] overflow-clip relative w-full">
-        <div
-          ref={drop}
-          className={`p-6 rounded-lg min-h-[400px] ${isOver ? 'bg-blue-50 border-2 border-dashed border-blue-300' : ''}`}
-        >
+        <div ref={drop} className={`p-6 rounded-lg min-h-[400px] ${isOver ? 'bg-blue-50 border-2 border-dashed border-blue-300' : ''}`}>
           <div className="space-y-4">
             {parentBlocks.map((parentBlock, index) => {
               // Get child blocks for this parent and sort them by the order they appear in the children array
@@ -1683,7 +1576,7 @@ function TextEditor({ droppedBlocks, onDrop, onMove, onRemove, onTextChange, cus
                 <DroppedBlock
                   key={`${parentBlock.id}-${index}`}
                   block={parentBlock}
-                  index={parentBlockIndex} // Use the safe index
+                  index={parentBlockIndex}
                   childBlocks={childBlocks}
                   droppedBlocks={droppedBlocks}
                   onMove={onMove}
@@ -1743,44 +1636,10 @@ function TextEditor({ droppedBlocks, onDrop, onMove, onRemove, onTextChange, cus
       </div>
     </div>
   );
-}
-
-// Develop Text Button Component
-function DevelopTextButton({ droppedBlocks, onDevelopText, isGenerating, openaiConnected }) {
-  if (isGenerating) {
-    return (
-      <div className="mt-4 flex justify-center">
-        <LoadingSpinner message="ChatGPT is expanding your text..." />
-      </div>
-    );
-  }
-
-  return (
-    <div className="mt-4 flex flex-col items-center">
-      <button
-        onClick={onDevelopText}
-        className="bg-[#1b00b6] text-white px-10 py-6 rounded hover:bg-blue-800 transition-colors disabled:bg-gray-600 disabled:cursor-not-allowed font-['Chivo:Bold',_sans-serif] text-[16px] text-center font-bold"
-        disabled={droppedBlocks.length === 0 || !openaiConnected}
-      >
-        Develop full text
-      </button>
-      {droppedBlocks.length === 0 && (
-        <p className="text-sm text-gray-500 mt-2 text-center">
-          Add some writing blocks first to get started
-        </p>
-      )}
-      {!openaiConnected && (
-        <p className="text-sm text-orange-600 mt-2 text-center">
-          Connect to OpenAI in settings to use ChatGPT
-        </p>
-      )}
-    </div>
-  );
-}
+});
 
 // Developed Text Panel Component
-function DevelopedTextPanel({ expandedTextArray, onTextChange, isGenerating }) {
-
+const DevelopedTextPanel = React.forwardRef(function DevelopedTextPanel({ expandedTextArray, onTextChange, isGenerating }, ref) {
   const handleItemChange = useCallback((index, newValue) => {
     const newArray = [...expandedTextArray];
     newArray[index] = newValue;
@@ -1801,7 +1660,12 @@ function DevelopedTextPanel({ expandedTextArray, onTextChange, isGenerating }) {
 
   if (expandedTextArray.length > 0) {
     return (
-      <div className="border border-gray-200 rounded-lg bg-white min-h-[200px]">
+      <div ref={ref} className="border border-gray-200 rounded-lg bg-white min-h-[200px]">
+        {isGenerating && (
+          <div className="flex items-center justify-center py-3 border-b border-gray-200">
+            <LoadingSpinner message="Developing text..." />
+          </div>
+        )}
         {expandedTextArray.map((item, index) => (
           <div key={index} className="flex border-b border-gray-200 last:border-b-0">
             {/* Number strip */}
@@ -1834,27 +1698,57 @@ function DevelopedTextPanel({ expandedTextArray, onTextChange, isGenerating }) {
   }
 
   return (
-    <div className="bg-[#ffffff] min-h-[400px] w-full border border-gray-200 rounded-lg">
-      <div className="flex items-center justify-center h-[400px] p-8 text-center">
-        <p className="text-gray-500">
-          Click "Develop full text" in the left panel to generate your expanded text here.
-        </p>
-      </div>
+    <div ref={ref} className="bg-[#ffffff] min-h-[400px] w-full border border-gray-200 rounded-lg">
+      {isGenerating ? (
+        <div className="flex items-center justify-center h-[400px] p-8">
+          <LoadingSpinner message="Developing text..." />
+        </div>
+      ) : (
+        <div className="flex items-center justify-center h-[400px] p-8 text-center">
+          <p className="text-gray-500">
+            Click "Develop full text" in the left panel to generate your expanded text here.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+});
+
+// Drag handle component (preserved from Figma design)
+function DragHandle() {
+  return (
+    <div className="h-3 relative shrink-0 w-[6.857px]">
+      <svg
+        className="block size-full"
+        fill="none"
+        preserveAspectRatio="none"
+        viewBox="0 0 7 12"
+      >
+        <g>
+          <circle cx="0.857143" cy="0.857143" fill="#808080" r="0.857143" />
+          <circle cx="0.857143" cy="5.99985" fill="#808080" r="0.857143" />
+          <circle cx="0.857143" cy="11.1429" fill="#808080" r="0.857143" />
+          <circle cx="6" cy="0.857143" fill="#808080" r="0.857143" />
+          <circle cx="6" cy="5.99985" fill="#808080" r="0.857143" />
+          <circle cx="6" cy="11.1429" fill="#808080" r="0.857143" />
+        </g>
+      </svg>
     </div>
   );
 }
 
-function DropLineIndicator({ isVisible, position = 'above' }) {
-  if (!isVisible) return null;
-  
+// Develop Text Button (matches previous layout styles)
+function DevelopTextButton({ droppedBlocks, onDevelopText, isGenerating, openaiConnected }) {
+  const canDevelop = droppedBlocks.filter(b => b && !b.parentId).length > 0;
   return (
-    <div 
-      className={`absolute left-0 right-0 h-0.5 bg-[#1b00b6] z-10 ${
-        position === 'above' ? '-top-1' : '-bottom-1'
-      }`}
-    >
-      <div className="absolute left-0 top-1/2 -translate-y-1/2 w-2 h-2 bg-[#1b00b6] rounded-full -translate-x-1"></div>
-      <div className="absolute right-0 top-1/2 -translate-y-1/2 w-2 h-2 bg-[#1b00b6] rounded-full translate-x-1"></div>
+    <div className="mt-4">
+      <button
+        onClick={onDevelopText}
+        disabled={isGenerating || !openaiConnected || !canDevelop}
+        className="bg-[#1b00b6] text-white px-5 py-2.5 rounded hover:bg-blue-800 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed font-['Chivo:Bold',_sans-serif] text-[14px]"
+      >
+        {isGenerating ? 'Developing…' : 'Develop full text'}
+      </button>
     </div>
   );
 }
@@ -1862,27 +1756,150 @@ function DropLineIndicator({ isVisible, position = 'above' }) {
 export default function App() {
   const [droppedBlocks, setDroppedBlocks] = useState([]);
   const [customText, setCustomText] = useState('');
-  //const [fullText, setFullText] = useState('');
-  const [expandedTextArray, setExpandedTextArray] = useState([]); // Track expanded text as array
+  const [expandedTextArray, setExpandedTextArray] = useState([]);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [regeneratingBlocks, setRegeneratingBlocks] = useState(new Set()); // Track which blocks are being regenerated
-  const [nextBlockId, setNextBlockId] = useState(1000); // Start custom blocks at ID 1000
+  const [regeneratingBlocks, setRegeneratingBlocks] = useState(new Set());
+  const [nextBlockId, setNextBlockId] = useState(1000);
   const [copiedToClipboard, setCopiedToClipboard] = useState(false);
-
-  //const [openaiApiKey, setOpenaiApiKey] = useState('');
   const [error, setError] = useState('');
   const [generatingTitleForBlocks, setGeneratingTitleForBlocks] = useState(new Set());
-  
-  // New state for dynamic blocks
   const [writingBlocks, setWritingBlocks] = useState(DEFAULT_WRITING_BLOCKS);
   const [isGeneratingBlocks, setIsGeneratingBlocks] = useState(false);
   const [currentTopic, setCurrentTopic] = useState('');
   const [openaiConnected, setOpenaiConnected] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-
-  // States for writing mode
   const [writingMode, setWritingMode] = useState('block'); // 'block' | 'manual' | 'ai-only'
-  const [manualText, setManualText] = useState(''); // For manual writing mode
+  const [manualText, setManualText] = useState('');
+
+  // AOI refs
+  const topicInputRef = useRef(null);
+  const writingBlocksRef = useRef(null);
+  const textEditorRef = useRef(null);
+  const developedPanelRef = useRef(null);
+  const manualTextareaRef = useRef(null);
+
+  // AOI logs
+  const aoiLogsRef = useRef([]);
+  const sessionIdRef = useRef(`session-${Date.now()}`);
+
+  const getRectFromEl = useCallback((el) => {
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { top: r.top, left: r.left, right: r.right, bottom: r.bottom };
+  }, []);
+
+  const buildAreas = useCallback(() => {
+    const areas = {};
+    if (writingMode === 'block') {
+      const topic = getRectFromEl(topicInputRef.current);
+      const grid = getRectFromEl(writingBlocksRef.current);
+      const editor = getRectFromEl(textEditorRef.current);
+      const dev = getRectFromEl(developedPanelRef.current);
+      if (topic) areas.TopicInput = topic;
+      if (grid) areas.WritingBlock = grid; // match requested name
+      if (editor) areas.TextEditor = editor;
+      if (dev) areas.DevelopedTextPanel = dev;
+    } else if (writingMode === 'ai-only') {
+      const topic = getRectFromEl(topicInputRef.current);
+      const dev = getRectFromEl(developedPanelRef.current);
+      if (topic) areas.TopicInput = topic;
+      if (dev) areas.DevelopedTextPanel = dev;
+    } else if (writingMode === 'manual') {
+      const manual = getRectFromEl(manualTextareaRef.current);
+      if (manual) areas.ManualTextarea = manual;
+    }
+    return areas;
+  }, [getRectFromEl, writingMode]);
+
+  const logAOIEntry = useCallback((reason = 'heartbeat') => {
+    const entry = {
+      ts: Date.now(),
+      sessionId: sessionIdRef.current,
+      reason,
+      writingMode,
+      window: {
+        innerWidth: window.innerWidth,
+        innerHeight: window.innerHeight,
+        scrollX: window.scrollX,
+        scrollY: window.scrollY,
+        dpr: window.devicePixelRatio,
+      },
+      areas: buildAreas(),
+    };
+    aoiLogsRef.current.push(entry);
+  }, [buildAreas, writingMode]);
+
+  // Scroll/resize listeners + heartbeat
+  useEffect(() => {
+    const onScroll = () => logAOIEntry('scroll');
+    const onResize = () => logAOIEntry('resize');
+
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onResize);
+
+    const hb = setInterval(() => logAOIEntry('heartbeat'), 500);
+
+    // Initial capture
+    setTimeout(() => logAOIEntry('init'), 0);
+
+    return () => {
+      clearInterval(hb);
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onResize);
+    };
+  }, [logAOIEntry]);
+
+  // Layout-change via ResizeObserver on relevant AOIs
+  useEffect(() => {
+    const observers = [];
+
+    const observeEl = (el) => {
+      if (!el || typeof ResizeObserver === 'undefined') return;
+      const ro = new ResizeObserver(() => logAOIEntry('layout-change'));
+      ro.observe(el);
+      observers.push(ro);
+    };
+
+    if (writingMode === 'block') {
+      observeEl(topicInputRef.current);
+      observeEl(writingBlocksRef.current);
+      observeEl(textEditorRef.current);
+      observeEl(developedPanelRef.current);
+    } else if (writingMode === 'ai-only') {
+      observeEl(topicInputRef.current);
+      observeEl(developedPanelRef.current);
+    } else if (writingMode === 'manual') {
+      observeEl(manualTextareaRef.current);
+    }
+
+    // Log immediately when mode or dependencies change
+    logAOIEntry('mode-or-content-change');
+
+    return () => {
+      observers.forEach(o => o.disconnect());
+    };
+  }, [
+    writingMode,
+    writingBlocks.length,
+    droppedBlocks.length,
+    expandedTextArray.length,
+    logAOIEntry,
+  ]);
+
+  const handleDownloadAOILog = useCallback(() => {
+    // Set filename using Brisbane, Australia time (UTC+10)
+    const brisbaneTime = new Date().toLocaleString('sv-SE', { timeZone: 'Australia/Brisbane' }).replace(' ', 'T');
+    const filename = `aoi_log_${brisbaneTime.replace(/[:.]/g, '-')}.json`;
+    const blob = new Blob([JSON.stringify(aoiLogsRef.current, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }, []);
 
   // Auto-connect when app loads
   useEffect(() => {
@@ -1892,11 +1909,9 @@ export default function App() {
         setOpenaiConnected(true);
       } catch (error) {
         console.warn('Auto-connection failed:', error.message);
-        // Show settings if auto-connection fails
         setShowSettings(true);
       }
     };
-    
     autoConnect();
   }, []);
 
@@ -2471,20 +2486,14 @@ Respond with only the expanded paragraph, no additional commentary or formatting
   }, [droppedBlocks, openaiConnected, currentTopic]);
 
   const handleCopyToClipboard = useCallback(async () => {
-    if (expandedTextArray.length === 0) return;
-
-    const fullText = expandedTextArray.join('\n\n').trim();
-
     try {
-      await navigator.clipboard.writeText(fullText);
+      const text = expandedTextArray.join('\n\n').trim();
+      if (!text) return;
+      await navigator.clipboard.writeText(text);
       setCopiedToClipboard(true);
-
-      // Reset the feedback after 2 seconds
-      setTimeout(() => {
-        setCopiedToClipboard(false);
-      }, 2000);
-    } catch (error) {
-      console.error('Failed to copy to clipboard:', error);
+      setTimeout(() => setCopiedToClipboard(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy to clipboard:', err);
       setError('Failed to copy text to clipboard');
     }
   }, [expandedTextArray]);
@@ -2533,45 +2542,42 @@ Respond with only the expanded paragraph, no additional commentary or formatting
               <button
                 onClick={() => setShowSettings(!showSettings)}
                 className={`p-2 rounded-md transition-colors ${openaiConnected
-                    ? 'text-green-600 hover:text-green-800 hover:bg-green-100'
-                    : 'text-gray-600 hover:text-gray-800 hover:bg-gray-100'
-                  }`}
+                  ? 'text-green-600 hover:text-green-800 hover:bg-green-100'
+                  : 'text-gray-600 hover:text-gray-800 hover:bg-gray-100'}`}
                 title="Settings"
               >
                 <Settings size={20} />
               </button>
+
+              <button
+                onClick={handleDownloadAOILog}
+                className="px-3 py-1.5 rounded text-[12px] font-['Chivo:Bold',_sans-serif] bg-gray-100 hover:bg-gray-200 text-gray-700"
+                title="Download AOI log JSON"
+              >
+                Download AOI Log
+              </button>
             </div>
           </div>
 
-          {/* AI Settings Panel */}
-          {showSettings && (
-            <AISettingsPanel
-              onConnectionChange={handleConnectionChange}
-            />
-          )}
-
-          {/* Error display */}
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-6">
-              <p className="font-['Chivo:Regular',_sans-serif] text-[14px]">{error}</p>
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-6 text-sm">
+              {error}
             </div>
           )}
 
           {/* Block Writing Mode */}
           {writingMode === 'block' && (
             <>
-              {/* Full-width top section */}
               <div className="space-y-6 mb-8">
-                {/* Topic Input */}
                 <TopicInput
+                  ref={topicInputRef}
                   onGenerateBlocks={handleGenerateBlocks}
                   isGenerating={isGeneratingBlocks}
                   openaiConnected={openaiConnected}
                   mode="block"
                 />
 
-                {/* Writing blocks grid */}
-                <div className="w-full">
+                <div className="w-full" ref={writingBlocksRef}>
                   {writingBlocks.length > 0 && (
                     <>
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 mb-2">
@@ -2626,14 +2632,13 @@ Respond with only the expanded paragraph, no additional commentary or formatting
                 </div>
               </div>
 
-              {/* Two-column layout */}
               <div className="grid grid-cols-2 gap-8">
-                {/* Left Column - Text Editor and Develop Button */}
                 <div>
                   <h4 className="font-['Chivo:Bold',_sans-serif] text-[14px] text-[#000000] mb-3">
                     Your Writing Draft
                   </h4>
                   <TextEditor
+                    ref={textEditorRef}
                     droppedBlocks={droppedBlocks}
                     onDrop={handleDrop}
                     onMove={handleMove}
@@ -2654,7 +2659,6 @@ Respond with only the expanded paragraph, no additional commentary or formatting
                   />
                 </div>
 
-                {/* Right Column - Developed Text */}
                 <div>
                   <div className="flex justify-between items-center mb-3">
                     <h4 className="font-['Chivo:Bold',_sans-serif] text-[14px] text-[#000000]">
@@ -2662,24 +2666,21 @@ Respond with only the expanded paragraph, no additional commentary or formatting
                     </h4>
                     {expandedTextArray.length > 0 && (
                       <div className="flex items-center gap-2">
-                        <div className="font-['Chivo:Regular',_sans-serif] text-[12px] text-[#666666]">
-                          {expandedTextArray.join('\n\n').trim().split(/\s+/).filter(word => word.length > 0).length} words
+                        <div className="text-xs text-[#666]">
+                          {expandedTextArray.join('\n\n').trim().split(/\s+/).filter(Boolean).length} words
                         </div>
                         <button
                           onClick={handleCopyToClipboard}
                           className="p-1.5 rounded hover:bg-gray-100 transition-colors text-gray-600 hover:text-blue-600"
                           title="Copy to clipboard"
                         >
-                          {copiedToClipboard ? (
-                            <Check size={16} className="text-green-600" />
-                          ) : (
-                            <Copy size={16} />
-                          )}
+                          {copiedToClipboard ? <Check size={16} className="text-green-600" /> : <Copy size={16} />}
                         </button>
                       </div>
                     )}
                   </div>
                   <DevelopedTextPanel
+                    ref={developedPanelRef}
                     expandedTextArray={expandedTextArray}
                     onTextChange={setExpandedTextArray}
                     isGenerating={isGenerating}
@@ -2689,16 +2690,16 @@ Respond with only the expanded paragraph, no additional commentary or formatting
             </>
           )}
 
-          {/* Manual Writing Mode */}
+          {/* Manual Mode */}
           {writingMode === 'manual' && (
-            <div className="max-w-4xl mx-auto">
+            <div className="max-w-4xl mx-auto" >
               <div className="flex justify-between items-center mb-3">
                 <h4 className="font-['Chivo:Bold',_sans-serif] text-[14px] text-[#000000]">
                   Manual Writing
                 </h4>
                 <div className="flex items-center gap-2">
-                  <div className="font-['Chivo:Regular',_sans-serif] text-[12px] text-[#666666]">
-                    {manualText.trim().split(/\s+/).filter(word => word.length > 0).length} words
+                  <div className="text-xs text-[#666]">
+                    {manualText.trim().split(/\s+/).filter(Boolean).length} words
                   </div>
                   <button
                     onClick={async () => {
@@ -2707,70 +2708,60 @@ Respond with only the expanded paragraph, no additional commentary or formatting
                         await navigator.clipboard.writeText(manualText);
                         setCopiedToClipboard(true);
                         setTimeout(() => setCopiedToClipboard(false), 2000);
-                      } catch (error) {
-                        console.error('Failed to copy to clipboard:', error);
+                      } catch (err) {
+                        console.error('Failed to copy to clipboard:', err);
                         setError('Failed to copy text to clipboard');
                       }
                     }}
                     className="p-1.5 rounded hover:bg-gray-100 transition-colors text-gray-600 hover:text-blue-600"
                     title="Copy to clipboard"
                   >
-                    {copiedToClipboard ? (
-                      <Check size={16} className="text-green-600" />
-                    ) : (
-                      <Copy size={16} />
-                    )}
+                    {copiedToClipboard ? <Check size={16} className="text-green-600" /> : <Copy size={16} />}
                   </button>
                 </div>
               </div>
               <textarea
+                ref={manualTextareaRef}
                 value={manualText}
                 onChange={(e) => setManualText(e.target.value)}
-                className="w-full min-h-[600px] p-6 border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 font-['Chivo:Regular',_sans-serif] text-[14px] leading-6"
+                className="w-full min-h-[600px] p-6 border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 text-[14px] leading-6"
                 placeholder="Start writing your text here..."
               />
             </div>
           )}
 
-          {/* AI-Only Mode */}
+          {/* AI-only Mode */}
           {writingMode === 'ai-only' && (
             <>
-              {/* AI Prompt Input - Full Width */}
               <div className="mb-6">
                 <TopicInput
+                  ref={topicInputRef}
                   onGenerateBlocks={handleAIOnlyGenerate}
                   isGenerating={isGenerating}
                   openaiConnected={openaiConnected}
                   mode="ai-only"
                 />
               </div>
-
-              {/* AI Response - Centered with max width */}
               <div className="max-w-4xl mx-auto">
                 <div className="flex justify-between items-center mb-3">
-                  <h4 className="font-['Chivo:Bold',_sans-serif] text-[14px] text-[#000000]">
-                    AI Response
-                  </h4>
+                  <h4 className="font-['Chivo:Bold',_sans-serif] text-[14px] text-[#000000]">AI Response</h4>
                   {expandedTextArray.length > 0 && (
                     <div className="flex items-center gap-2">
-                      <div className="font-['Chivo:Regular',_sans-serif] text-[12px] text-[#666666]">
-                        {expandedTextArray.join('\n\n').trim().split(/\s+/).filter(word => word.length > 0).length} words
+                      <div className="text-xs text-[#666]">
+                        {expandedTextArray.join('\n\n').trim().split(/\s+/).filter(Boolean).length} words
                       </div>
                       <button
                         onClick={handleCopyToClipboard}
                         className="p-1.5 rounded hover:bg-gray-100 transition-colors text-gray-600 hover:text-blue-600"
                         title="Copy to clipboard"
                       >
-                        {copiedToClipboard ? (
-                          <Check size={16} className="text-green-600" />
-                        ) : (
-                          <Copy size={16} />
-                        )}
+                        {copiedToClipboard ? <Check size={16} className="text-green-600" /> : <Copy size={16} />}
                       </button>
                     </div>
                   )}
                 </div>
                 <DevelopedTextPanel
+                  ref={developedPanelRef}
                   expandedTextArray={expandedTextArray}
                   onTextChange={setExpandedTextArray}
                   isGenerating={isGenerating}
