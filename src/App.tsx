@@ -1,5 +1,6 @@
 // @ts-nocheck
 import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { diff_match_patch, DIFF_INSERT, DIFF_DELETE } from 'diff-match-patch';
 import { DndProvider, useDrag, useDrop } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { Settings, RotateCcw, Copy, Check } from 'lucide-react';
@@ -560,15 +561,16 @@ async function testOpenAIConnection() {
   }
 }
 
-async function expandTextWithOpenAI(blocks, topic) {
-  // Get only parent blocks for expansion
+async function expandTextWithOpenAI(blocks, topic, existingExpandedTextArray = []) {
+  // Get parent blocks for expansion
   const parentBlocks = blocks.filter(block => 
     block && (block.parentId === null || block.parentId === undefined)
   );
   
   const expandedParagraphs = [];
-  
-  for (const parent of parentBlocks) {
+  // Iterate with index to map to existing expanded text array
+  for (let i = 0; i < parentBlocks.length; i++) {
+    const parent = parentBlocks[i];
     // Get children for this parent
     const children = blocks.filter(block => 
       block && block.parentId === parent.id
@@ -578,6 +580,14 @@ async function expandTextWithOpenAI(blocks, topic) {
       // Parent with children - create cohesive paragraph
       const allContent = [parent.summary, ...children.map(child => child.summary)];
       
+      // Include only the current developed text for THIS parent block (if any)
+      const currentExpandedText = Array.isArray(existingExpandedTextArray)
+        ? (existingExpandedTextArray[i] || '')
+        : '';
+      const referenceTextSection = currentExpandedText && currentExpandedText.trim()
+        ? `\n\nFor reference, this is the current developed text for this block (if any):\n${currentExpandedText.trim()}`
+        : '';
+
       const prompt = `You are a clear and concise writer. 
 
 Your goal is to write text that sounds natural to read out loud, using simple and direct language while staying polished and credible. 
@@ -585,6 +595,8 @@ Your task is to expand the following outline into a cohesive paragraph.
 
 Topic sentence: ${parent.summary}
 Supporting points: ${children.map(child => `- ${child.summary}`).join('\n')}
+
+${referenceTextSection}
 
 Instructions:
 - Create a ${allContent.length * 1.5} sentence paragraph
@@ -609,8 +621,13 @@ Respond with only the expanded paragraph, no additional commentary or formatting
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+        try {
+          const errorData = await response.json();
+          throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+        } catch (_) {
+          const errorText = await response.text();
+          throw new Error(errorText || `HTTP error! status: ${response.status}`);
+        }
       }
 
       const data = await response.json();
@@ -623,7 +640,11 @@ Respond with only the expanded paragraph, no additional commentary or formatting
       expandedParagraphs.push(expansion);
     } else {
       // Simple parent block - expand normally using existing function
-      const expansion = await regenerateSingleBlockExpansion(parent, topic);
+      // Pass only the current developed text for this parent (if any)
+      const currentExpandedText = Array.isArray(existingExpandedTextArray)
+        ? (existingExpandedTextArray[i] || '')
+        : '';
+      const expansion = await regenerateSingleBlockExpansion(parent, topic, currentExpandedText);
       expandedParagraphs.push(expansion);
     }
   }
@@ -632,9 +653,15 @@ Respond with only the expanded paragraph, no additional commentary or formatting
 }
 
 // Regenerate expansion for a single block
-async function regenerateSingleBlockExpansion(block, topic) {
+// Optionally include the current expanded text for this block as reference
+async function regenerateSingleBlockExpansion(block, topic, currentExpandedText = '') {
 
   // Create a prompt for expanding just one block
+
+  const referenceSection = currentExpandedText && currentExpandedText.trim()
+    ? `\n\nFor reference, this is the current text developed for this block (if any)::\n${currentExpandedText.trim()}`
+    : '';
+
   const prompt = `You are a clear and concise writer. Your goal is to write text that sounds natural to read out loud, using simple and direct language while staying polished and credible. Your task is to expand the following outline point into 1–2 natural, readable sentences.
 
 Each expansion should:
@@ -643,6 +670,8 @@ Each expansion should:
 
 Outline point to expand:
 ${block.summary}
+
+${referenceSection}
 
 Instructions:
 - Use plain, everyday English (aim for clarity, not elegance)
@@ -886,7 +915,7 @@ function EditableText({ value, onSave, placeholder, className, isTitle = false, 
 }
 
 // Topic Input Component
-function TopicInput({ onGenerateBlocks, isGenerating, openaiConnected, mode }) {
+const TopicInput = React.forwardRef(function TopicInput({ onGenerateBlocks, isGenerating, openaiConnected, mode, onTopicChange }, ref) {
   const [topic, setTopic] = useState('');
   const textareaRef = useRef(null);
 
@@ -894,17 +923,14 @@ function TopicInput({ onGenerateBlocks, isGenerating, openaiConnected, mode }) {
   const adjustTextareaHeight = useCallback(() => {
     const textarea = textareaRef.current;
     if (textarea) {
-      // Reset height to auto to get the correct scrollHeight
       textarea.style.height = 'auto';
-      // Set height to scrollHeight or minimum 3 lines
-      const lineHeight = 24; // Approximate line height
-      const minHeight = lineHeight * 3; // 3 lines minimum
+      const lineHeight = 24;
+      const minHeight = lineHeight * 3;
       const newHeight = Math.max(textarea.scrollHeight, minHeight);
       textarea.style.height = `${newHeight}px`;
     }
   }, []);
 
-  // Adjust height when component mounts and when topic changes
   useEffect(() => {
     adjustTextareaHeight();
   }, [topic, adjustTextareaHeight]);
@@ -920,24 +946,22 @@ function TopicInput({ onGenerateBlocks, isGenerating, openaiConnected, mode }) {
   };
 
   const handleKeyDown = useCallback((e) => {
-    // Only handle Enter key for generation, let browser handle all other keys
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleGenerate();
     }
-    // All other keys (including Cmd+A, Cmd+C, etc.) will be handled by the browser
   }, [handleGenerate]);
 
   const handleChange = (e) => {
     setTopic(e.target.value);
-    // Adjust height after state update
+    if (onTopicChange) onTopicChange(e.target.value);
     setTimeout(adjustTextareaHeight, 0);
   };
 
   const canGenerate = topic.trim() && !isGenerating;
 
   return (
-    <div className="bg-[rgba(248,248,248,1)] rounded-lg p-4 mb-6">
+    <div ref={ref} className="bg-[rgba(248,248,248,1)] rounded-lg p-4 mb-6">
       <h3 className="font-['Chivo:Bold',_sans-serif] text-[16px] text-[#000000] mb-3">
         {mode==="ai-only" ? "Generate Your Writing" : "Generate Writing Blocks for Your Topic"}
       </h3>
@@ -975,100 +999,7 @@ function TopicInput({ onGenerateBlocks, isGenerating, openaiConnected, mode }) {
       </div>
     </div>
   );
-}
-
-function AISettingsPanel({ onConnectionChange }) {
-  const [isConnected, setIsConnected] = useState(false);
-  const [isConnecting, setIsConnecting] = useState(false);
-  const [connectionError, setConnectionError] = useState('');
-
-  useEffect(() => {
-    if (onConnectionChange) {
-      onConnectionChange(isConnected);
-    }
-  }, [isConnected, onConnectionChange]);
-
-  const handleConnect = async () => {
-    setIsConnecting(true);
-    setConnectionError('');
-
-    try {
-      await testOpenAIConnection();
-      setIsConnected(true);
-      setConnectionError('');
-    } catch (error) {
-      setConnectionError(error.message);
-      setIsConnected(false);
-    } finally {
-      setIsConnecting(false);
-    }
-  };
-
-  return (
-    <div className="bg-gray-50 rounded-lg p-4 mb-6 border border-gray-200">
-      <h3 className="font-['Chivo:Bold',_sans-serif] text-[16px] text-[#000000] mb-3">OpenAI Connection</h3>
-      
-      <div className="flex flex-col gap-3">
-        <div className="flex items-center gap-4">
-          <span className="font-['Chivo:Regular',_sans-serif] text-[14px] text-[#000000]">
-            ChatGPT Integration
-          </span>
-          {isConnected ? (
-            <span className="bg-green-100 text-green-800 text-[10px] px-2 py-1 rounded-full font-['Chivo:Bold',_sans-serif]">
-              Connected
-            </span>
-          ) : (
-            <button
-              type="button"
-              onClick={handleConnect}
-              disabled={isConnecting}
-              className="bg-[#1b00b6] text-white px-4 py-2 rounded hover:bg-blue-800 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed font-['Chivo:Bold',_sans-serif] text-[12px]"
-            >
-              {isConnecting ? 'Connecting...' : 'Test Connection'}
-            </button>
-          )}
-        </div>
-
-        {connectionError && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded">
-            <p className="font-['Chivo:Regular',_sans-serif] text-[12px]">
-              Connection failed: {connectionError}
-            </p>
-          </div>
-        )}
-        
-        <div className="text-[12px] text-gray-600 font-['Chivo:Regular',_sans-serif]">
-          <p>• API key is configured server-side for security</p>
-          <p>• Uses GPT-4o models for high-quality results</p>
-          <p>• No API key storage or exposure in browser</p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Drag handle component (preserved from Figma design)
-function DragHandle() {
-  return (
-    <div className="h-3 relative shrink-0 w-[6.857px]">
-      <svg
-        className="block size-full"
-        fill="none"
-        preserveAspectRatio="none"
-        viewBox="0 0 7 12"
-      >
-        <g>
-          <circle cx="0.857143" cy="0.857143" fill="#808080" r="0.857143" />
-          <circle cx="0.857143" cy="5.99985" fill="#808080" r="0.857143" />
-          <circle cx="0.857143" cy="11.1429" fill="#808080" r="0.857143" />
-          <circle cx="6" cy="0.857143" fill="#808080" r="0.857143" />
-          <circle cx="6" cy="5.99985" fill="#808080" r="0.857143" />
-          <circle cx="6" cy="11.1429" fill="#808080" r="0.857143" />
-        </g>
-      </svg>
-    </div>
-  );
-}
+})
 
 // Collaboration cursor indicator
 function WriterCursor({ isVisible, position, userName = "Writer 1" }) {
@@ -1117,6 +1048,17 @@ function LoadingSpinner({ message }) {
       <span className="text-sm text-gray-600 flex-1 text-center">
         {message || 'ChatGPT is working...'}
       </span>
+    </div>
+  );
+}
+
+// Drop line indicator used in editor reordering
+function DropLineIndicator({ isVisible, position }) {
+  if (!isVisible) return null;
+  const posClass = position === 'above' ? '-top-2' : '-bottom-2';
+  return (
+    <div className={`absolute ${posClass} left-0 right-0 h-[2px] z-20`}>
+      <div className="h-[2px] bg-blue-500" />
     </div>
   );
 }
@@ -1218,30 +1160,34 @@ function DroppedBlock({
     },
   });
 
+  // Helper function to check circular relationships (hoisted)
+  function wouldCreateCircularRelation(draggedId, targetParentId) {
+    if (!draggedId || !targetParentId) return false;
+    let currentBlock = droppedBlocks.find(b => b && b.id === targetParentId);
+    while (currentBlock && currentBlock.parentId) {
+      if (currentBlock.parentId === draggedId) {
+        return true;
+      }
+      currentBlock = droppedBlocks.find(b => b && b.id === currentBlock.parentId);
+    }
+    return false;
+  }
+
   // Separate drop zones for reordering
   const [{ isOver: isOverTop }, dropTop] = useDrop({
     accept: 'dropped-block',
-    hover: (draggedItem) => {
-      if (!draggedItem || !draggedItem.id || draggedItem.id === block.id) return;
-
-      // Only proceed if we have valid blocks
-      const draggedBlock = droppedBlocks.find(b => b && b.id === draggedItem.id);
+    drop: (draggedItem, monitor) => {
+      const item = monitor.getItem();
+      if (!item || item.id === block.id || item.source !== 'editor') return;
+      const draggedBlock = droppedBlocks.find(b => b && b.id === item.id);
       if (!draggedBlock) return;
-
-      // Check if both blocks are children of the same parent
-      if (draggedBlock.parentId && block.parentId &&
-        draggedBlock.parentId === block.parentId) {
-        // This is child reordering - use ID-based approach
-        onMove(draggedItem, { ...block, source: 'editor' });
-      } else if (!draggedBlock.parentId && !block.parentId) {
-        // This is top-level reordering - use index-based approach
-        if (draggedItem.index !== index && draggedItem.index !== index - 1) {
-          onMove(draggedItem.index, index);
-          draggedItem.index = index;
-        }
+      // If same parent, or cross-hierarchy, delegate to onMove with IDs
+      if ((draggedBlock.parentId && block.parentId && draggedBlock.parentId === block.parentId) ||
+          (draggedBlock.parentId !== block.parentId)) {
+        onMove(item, { ...block, source: 'editor' });
       } else {
-        // Cross-hierarchy move (child to parent or vice versa)
-        onMove(draggedItem, { ...block, source: 'editor' });
+        // Top-level reorder: place above target index
+        onMove(item.index, index);
       }
     },
     collect: (monitor) => ({
@@ -1251,31 +1197,17 @@ function DroppedBlock({
 
   const [{ isOver: isOverBottom }, dropBottom] = useDrop({
     accept: 'dropped-block',
-    hover: (draggedItem) => {
-      if (!draggedItem || !draggedItem.id || draggedItem.id === block.id) return;
-
-      // Only proceed if we have valid blocks
-      const draggedBlock = droppedBlocks.find(b => b && b.id === draggedItem.id);
+    drop: (draggedItem, monitor) => {
+      const item = monitor.getItem();
+      if (!item || item.id === block.id || item.source !== 'editor') return;
+      const draggedBlock = droppedBlocks.find(b => b && b.id === item.id);
       if (!draggedBlock) return;
-
-      // Check if both blocks are children of the same parent
-      if (draggedBlock.parentId && block.parentId &&
-        draggedBlock.parentId === block.parentId) {
-        // This is child reordering - use ID-based approach
-        onMove(draggedItem, { ...block, source: 'editor' });
-      } else if (!draggedBlock.parentId && !block.parentId) {
-        // This is top-level reordering - use index-based approach
-        // FIXED: Properly handle moving down for parent blocks with children
-        const draggedIndex = droppedBlocks.findIndex(b => b && b.id === draggedBlock.id);
-        const targetIndex = droppedBlocks.findIndex(b => b && b.id === block.id);
-
-        if (draggedIndex !== -1 && targetIndex !== -1 && draggedIndex !== targetIndex + 1) {
-          onMove(draggedIndex, targetIndex + 1);
-          draggedItem.index = targetIndex + 1;
-        }
+      if ((draggedBlock.parentId && block.parentId && draggedBlock.parentId === block.parentId) ||
+          (draggedBlock.parentId !== block.parentId)) {
+        onMove(item, { ...block, source: 'editor' });
       } else {
-        // Cross-hierarchy move (child to parent or vice versa)
-        onMove(draggedItem, { ...block, source: 'editor' });
+        const targetIndex = index + 1;
+        onMove(item.index, targetIndex);
       }
     },
     collect: (monitor) => ({
@@ -1288,32 +1220,13 @@ function DroppedBlock({
     accept: ['block', 'dropped-block'],
     drop: (item, monitor) => {
       if (!monitor.didDrop()) {
-        // Prevent dropping a block into its own child zone
-        if (item.id === block.id) {
-          return;
-        }
+        if (item.id === block.id) return;
 
-        // Find the dragged block to check if it has children
         const draggedBlock = droppedBlocks.find(b => b && b.id === item.id);
-
-        // Prevent dropping parent blocks with children into child zones
         if (draggedBlock && draggedBlock.children && draggedBlock.children.length > 0) {
           console.warn('Cannot drop a parent block with children into a child zone');
           return;
         }
-
-        // Prevent creating circular relationships - check if the block being dropped
-        // is already a parent of the target block
-        const wouldCreateCircularRelation = (draggedId, targetParentId) => {
-          let currentBlock = droppedBlocks.find(b => b && b.id === targetParentId);
-          while (currentBlock && currentBlock.parentId) {
-            if (currentBlock.parentId === draggedId) {
-              return true;
-            }
-            currentBlock = droppedBlocks.find(b => b && b.id === currentBlock.parentId);
-          }
-          return false;
-        };
 
         if (!wouldCreateCircularRelation(item.id, block.id)) {
           onMove(item, { type: 'child-zone', parentId: block.id });
@@ -1326,26 +1239,13 @@ function DroppedBlock({
 
       return {
         isOver: monitor.isOver({ shallow: true }) &&
-          draggedItem?.id !== block.id && // Don't show hover state for self
-          !wouldCreateCircularRelation(draggedItem?.id, block.id) && // Don't show hover for circular drops
-          !(draggedBlock && draggedBlock.children && draggedBlock.children.length > 0), // Don't show hover for parent blocks with children
+          draggedItem?.id !== block.id &&
+          !wouldCreateCircularRelation(draggedItem?.id, block.id) &&
+          !(draggedBlock && draggedBlock.children && draggedBlock.children.length > 0),
       };
     },
   });
 
-  // Helper function to check circular relationships
-const wouldCreateCircularRelation = (draggedId, targetParentId) => {
-  if (!draggedId || !targetParentId) return false;
-  
-  let currentBlock = droppedBlocks.find(b => b && b.id === targetParentId);
-  while (currentBlock && currentBlock.parentId) {
-    if (currentBlock.parentId === draggedId) {
-      return true;
-    }
-    currentBlock = droppedBlocks.find(b => b && b.id === currentBlock.parentId);
-  }
-  return false;
-};
 
   // State for hover tracking and expansion
   const [isHovered, setIsHovered] = useState(false);
@@ -1546,7 +1446,10 @@ const wouldCreateCircularRelation = (draggedId, targetParentId) => {
 }
 
 // Text editing area with drop zone
-function TextEditor({ droppedBlocks, onDrop, onMove, onRemove, onTextChange, customText, onAddCustomBlock, onUpdateDroppedBlock, generatingTitleForBlocks, onRegenerateBlock, regeneratingBlocks }) {
+const TextEditor = React.forwardRef(function TextEditor(
+  { droppedBlocks, onDrop, onMove, onRemove, onTextChange, customText, onAddCustomBlock, onUpdateDroppedBlock, generatingTitleForBlocks, onRegenerateBlock, regeneratingBlocks },
+  ref
+) {
   const [{ isOver }, drop] = useDrop({
     accept: ['block', 'dropped-block'],
     drop: (item, monitor) => {
@@ -1658,12 +1561,9 @@ function TextEditor({ droppedBlocks, onDrop, onMove, onRemove, onTextChange, cus
   );
 
   return (
-    <div className="bg-[#ffffff] min-h-[400px] w-full border border-gray-200 rounded-lg">
+    <div ref={ref} className="bg-[#ffffff] min-h-[400px] w-full border border-gray-200 rounded-lg">
       <div className="min-h-[400px] overflow-clip relative w-full">
-        <div
-          ref={drop}
-          className={`p-6 rounded-lg min-h-[400px] ${isOver ? 'bg-blue-50 border-2 border-dashed border-blue-300' : ''}`}
-        >
+        <div ref={drop} className={`p-6 rounded-lg min-h-[400px] ${isOver ? 'bg-blue-50 border-2 border-dashed border-blue-300' : ''}`}>
           <div className="space-y-4">
             {parentBlocks.map((parentBlock, index) => {
               // Get child blocks for this parent and sort them by the order they appear in the children array
@@ -1683,7 +1583,7 @@ function TextEditor({ droppedBlocks, onDrop, onMove, onRemove, onTextChange, cus
                 <DroppedBlock
                   key={`${parentBlock.id}-${index}`}
                   block={parentBlock}
-                  index={parentBlockIndex} // Use the safe index
+                  index={parentBlockIndex}
                   childBlocks={childBlocks}
                   droppedBlocks={droppedBlocks}
                   onMove={onMove}
@@ -1743,44 +1643,10 @@ function TextEditor({ droppedBlocks, onDrop, onMove, onRemove, onTextChange, cus
       </div>
     </div>
   );
-}
-
-// Develop Text Button Component
-function DevelopTextButton({ droppedBlocks, onDevelopText, isGenerating, openaiConnected }) {
-  if (isGenerating) {
-    return (
-      <div className="mt-4 flex justify-center">
-        <LoadingSpinner message="ChatGPT is expanding your text..." />
-      </div>
-    );
-  }
-
-  return (
-    <div className="mt-4 flex flex-col items-center">
-      <button
-        onClick={onDevelopText}
-        className="bg-[#1b00b6] text-white px-10 py-6 rounded hover:bg-blue-800 transition-colors disabled:bg-gray-600 disabled:cursor-not-allowed font-['Chivo:Bold',_sans-serif] text-[16px] text-center font-bold"
-        disabled={droppedBlocks.length === 0 || !openaiConnected}
-      >
-        Develop full text
-      </button>
-      {droppedBlocks.length === 0 && (
-        <p className="text-sm text-gray-500 mt-2 text-center">
-          Add some writing blocks first to get started
-        </p>
-      )}
-      {!openaiConnected && (
-        <p className="text-sm text-orange-600 mt-2 text-center">
-          Connect to OpenAI in settings to use ChatGPT
-        </p>
-      )}
-    </div>
-  );
-}
+});
 
 // Developed Text Panel Component
-function DevelopedTextPanel({ expandedTextArray, onTextChange, isGenerating }) {
-
+const DevelopedTextPanel = React.forwardRef(function DevelopedTextPanel({ expandedTextArray, onTextChange, isGenerating }, ref) {
   const handleItemChange = useCallback((index, newValue) => {
     const newArray = [...expandedTextArray];
     newArray[index] = newValue;
@@ -1801,7 +1667,12 @@ function DevelopedTextPanel({ expandedTextArray, onTextChange, isGenerating }) {
 
   if (expandedTextArray.length > 0) {
     return (
-      <div className="border border-gray-200 rounded-lg bg-white min-h-[200px]">
+      <div ref={ref} className="border border-gray-200 rounded-lg bg-white min-h-[200px]">
+        {isGenerating && (
+          <div className="flex items-center justify-center py-3 border-b border-gray-200">
+            <LoadingSpinner message="Developing text..." />
+          </div>
+        )}
         {expandedTextArray.map((item, index) => (
           <div key={index} className="flex border-b border-gray-200 last:border-b-0">
             {/* Number strip */}
@@ -1834,27 +1705,57 @@ function DevelopedTextPanel({ expandedTextArray, onTextChange, isGenerating }) {
   }
 
   return (
-    <div className="bg-[#ffffff] min-h-[400px] w-full border border-gray-200 rounded-lg">
-      <div className="flex items-center justify-center h-[400px] p-8 text-center">
-        <p className="text-gray-500">
-          Click "Develop full text" in the left panel to generate your expanded text here.
-        </p>
-      </div>
+    <div ref={ref} className="bg-[#ffffff] min-h-[400px] w-full border border-gray-200 rounded-lg">
+      {isGenerating ? (
+        <div className="flex items-center justify-center h-[400px] p-8">
+          <LoadingSpinner message="Developing text..." />
+        </div>
+      ) : (
+        <div className="flex items-center justify-center h-[400px] p-8 text-center">
+          <p className="text-gray-500">
+            Click "Develop full text" in the left panel to generate your expanded text here.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+});
+
+// Drag handle component (preserved from Figma design)
+function DragHandle() {
+  return (
+    <div className="h-3 relative shrink-0 w-[6.857px]">
+      <svg
+        className="block size-full"
+        fill="none"
+        preserveAspectRatio="none"
+        viewBox="0 0 7 12"
+      >
+        <g>
+          <circle cx="0.857143" cy="0.857143" fill="#808080" r="0.857143" />
+          <circle cx="0.857143" cy="5.99985" fill="#808080" r="0.857143" />
+          <circle cx="0.857143" cy="11.1429" fill="#808080" r="0.857143" />
+          <circle cx="6" cy="0.857143" fill="#808080" r="0.857143" />
+          <circle cx="6" cy="5.99985" fill="#808080" r="0.857143" />
+          <circle cx="6" cy="11.1429" fill="#808080" r="0.857143" />
+        </g>
+      </svg>
     </div>
   );
 }
 
-function DropLineIndicator({ isVisible, position = 'above' }) {
-  if (!isVisible) return null;
-  
+// Develop Text Button (matches previous layout styles)
+function DevelopTextButton({ droppedBlocks, onDevelopText, isGenerating, openaiConnected }) {
+  const canDevelop = droppedBlocks.filter(b => b && !b.parentId).length > 0;
   return (
-    <div 
-      className={`absolute left-0 right-0 h-0.5 bg-[#1b00b6] z-10 ${
-        position === 'above' ? '-top-1' : '-bottom-1'
-      }`}
-    >
-      <div className="absolute left-0 top-1/2 -translate-y-1/2 w-2 h-2 bg-[#1b00b6] rounded-full -translate-x-1"></div>
-      <div className="absolute right-0 top-1/2 -translate-y-1/2 w-2 h-2 bg-[#1b00b6] rounded-full translate-x-1"></div>
+    <div className="mt-4">
+      <button
+        onClick={onDevelopText}
+        disabled={isGenerating || !openaiConnected || !canDevelop}
+        className="bg-[#1b00b6] text-white px-5 py-2.5 rounded hover:bg-blue-800 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed font-['Chivo:Bold',_sans-serif] text-[14px]"
+      >
+        {isGenerating ? 'Developing…' : 'Develop full text'}
+      </button>
     </div>
   );
 }
@@ -1862,27 +1763,304 @@ function DropLineIndicator({ isVisible, position = 'above' }) {
 export default function App() {
   const [droppedBlocks, setDroppedBlocks] = useState([]);
   const [customText, setCustomText] = useState('');
-  //const [fullText, setFullText] = useState('');
-  const [expandedTextArray, setExpandedTextArray] = useState([]); // Track expanded text as array
+  const [expandedTextArray, setExpandedTextArray] = useState([]);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [regeneratingBlocks, setRegeneratingBlocks] = useState(new Set()); // Track which blocks are being regenerated
-  const [nextBlockId, setNextBlockId] = useState(1000); // Start custom blocks at ID 1000
+  const [regeneratingBlocks, setRegeneratingBlocks] = useState(new Set());
+  const [nextBlockId, setNextBlockId] = useState(1000);
   const [copiedToClipboard, setCopiedToClipboard] = useState(false);
-
-  //const [openaiApiKey, setOpenaiApiKey] = useState('');
   const [error, setError] = useState('');
   const [generatingTitleForBlocks, setGeneratingTitleForBlocks] = useState(new Set());
-  
-  // New state for dynamic blocks
   const [writingBlocks, setWritingBlocks] = useState(DEFAULT_WRITING_BLOCKS);
   const [isGeneratingBlocks, setIsGeneratingBlocks] = useState(false);
   const [currentTopic, setCurrentTopic] = useState('');
   const [openaiConnected, setOpenaiConnected] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-
-  // States for writing mode
   const [writingMode, setWritingMode] = useState('block'); // 'block' | 'manual' | 'ai-only'
-  const [manualText, setManualText] = useState(''); // For manual writing mode
+  const [manualText, setManualText] = useState('');
+  const [loggingEnabled, setLoggingEnabled] = useState(false);
+  // Diff debug toggle and latest diffs (rolling 3)
+  const [showDiffDebug, setShowDiffDebug] = useState(false);
+  const [latestDiffs, setLatestDiffs] = useState([]);
+  // Reorder debug toggle and latest reorders (rolling 3)
+  const [showReorderDebug, setShowReorderDebug] = useState(false);
+  const [latestReorders, setLatestReorders] = useState([]);
+
+  // AOI refs
+  const topicInputRef = useRef(null);
+  const writingBlocksRef = useRef(null);
+  const textEditorRef = useRef(null);
+  const developedPanelRef = useRef(null);
+  const manualTextareaRef = useRef(null);
+
+  // AOI logs
+  const aoiLogsRef = useRef([]);
+  const sessionIdRef = useRef(`session-${Date.now()}`);
+
+  // TEXT_DIFF tracking
+  const prevTextsRef = useRef({
+    TopicInput: '',
+    TextEditor: {},
+    DevelopedTextPanel: {},
+    ManualTextarea: ''
+  });
+  const diffTimersRef = useRef({});
+
+  const tokenize = useCallback((s) => {
+    if (!s) return [];
+    return s.toString().trim().split(/\s+/).filter(Boolean);
+  }, []);
+
+  const dmpRef = useRef<diff_match_patch | null>(null);
+
+  useEffect(() => {
+    dmpRef.current = new diff_match_patch();
+  }, []);
+
+  // AI-only mode should rewrite the first block only.
+  // If multiple items appear due to appending, keep only the latest.
+  useEffect(() => {
+    if (writingMode === 'ai-only' && Array.isArray(expandedTextArray) && expandedTextArray.length > 1) {
+      const latest = expandedTextArray[expandedTextArray.length - 1];
+      setExpandedTextArray([latest]);
+    }
+  }, [expandedTextArray, writingMode]);
+
+  // Conversational continuity settings for AI-only mode
+  const MAX_HISTORY_TOKENS = 3000; // approx cap for prior assistant outputs
+
+  const buildMessagesForAIOnly = useCallback((prompt: string, historyText: string[]) => {
+    const system = {
+      role: 'system',
+      content: 'You are a clear, concise writing assistant. Continue the conversation naturally in plain, everyday English.'
+    };
+
+    const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [system];
+
+    // Add recent assistant outputs (most recent last), truncated by rough token estimate
+    let tokenEstimate = 0;
+    const startIdx = Math.max(0, historyText.length - 10);
+    for (let i = startIdx; i < historyText.length; i++) {
+      const content = (historyText[i] || '').toString();
+      const words = content.trim().split(/\s+/).filter(Boolean).length;
+      const approxTokens = Math.round(words * 1.3);
+      if (tokenEstimate + approxTokens > MAX_HISTORY_TOKENS) break;
+      messages.push({ role: 'assistant', content });
+      tokenEstimate += approxTokens;
+    }
+
+    messages.push({ role: 'user', content: prompt });
+    return messages;
+  }, []);
+
+  
+
+  const dmpDiffCounts = useCallback((prev, curr) => {
+    const dmp = dmpRef.current;
+    if (!dmp) return { addedWords: 0, removedWords: 0 };
+    const diffs = dmp.diff_main((prev || '').toString(), (curr || '').toString());
+    dmp.diff_cleanupSemantic(diffs);
+    let added = 0, removed = 0;
+    for (const [op, text] of diffs) {
+      if (op === DIFF_INSERT) added += tokenize(text).length;
+      else if (op === DIFF_DELETE) removed += tokenize(text).length;
+    }
+    return { addedWords: added, removedWords: removed };
+  }, [tokenize]);
+
+  const logTextDiff = useCallback(({ location, by, addedWords, removedWords, targetId, blockId = null, indexId = null }) => {
+    if (!loggingEnabled) return;
+    aoiLogsRef.current.push({
+      type: 'TEXT_DIFF',
+      ts: Date.now(),
+      sessionId: sessionIdRef.current,
+      writingMode,
+      location,
+      by,
+      addedWords,
+      removedWords,
+      targetId,
+      blockId,
+      indexId,
+    });
+  }, [writingMode, loggingEnabled]);
+
+  const scheduleDebouncedDiff = useCallback((key, prevText, currText, location, by, targetId, delay = 800, options = {}) => {
+    if (by === 'ai') {
+      const { addedWords, removedWords } = dmpDiffCounts(prevText, currText);
+      if (loggingEnabled && (addedWords || removedWords)) {
+        logTextDiff({ location, by, addedWords, removedWords, targetId, blockId: options?.blockId ?? null, indexId: options?.indexId ?? null });
+        setLatestDiffs(prev => [{ location, by, targetId, blockId: options?.blockId ?? null, indexId: options?.indexId ?? null, prevText: prevText || '', currText: currText || '', addedWords, removedWords }, ...prev].slice(0, 3));
+      }
+      if (location === 'TopicInput') prevTextsRef.current.TopicInput = currText || '';
+      if (location === 'TextEditor' && targetId != null) {
+        const storeKey = options?.storeKey ?? targetId;
+        prevTextsRef.current.TextEditor[storeKey] = currText || '';
+      }
+      if (location === 'DevelopedTextPanel' && options?.storeKey != null) {
+        prevTextsRef.current.DevelopedTextPanel[options.storeKey] = currText || '';
+      }
+      if (location === 'ManualTextarea') prevTextsRef.current.ManualTextarea = currText || '';
+      return;
+    }
+
+    if (diffTimersRef.current[key]) clearTimeout(diffTimersRef.current[key]);
+    diffTimersRef.current[key] = window.setTimeout(() => {
+      const { addedWords, removedWords } = dmpDiffCounts(prevText, currText);
+      if (loggingEnabled && (addedWords || removedWords)) {
+        logTextDiff({ location, by, addedWords, removedWords, targetId, blockId: options?.blockId ?? null, indexId: options?.indexId ?? null });
+        setLatestDiffs(prev => [{ location, by, targetId, blockId: options?.blockId ?? null, indexId: options?.indexId ?? null, prevText: prevText || '', currText: currText || '', addedWords, removedWords }, ...prev].slice(0, 3));
+        if (location === 'TopicInput') prevTextsRef.current.TopicInput = currText || '';
+        if (location === 'TextEditor' && targetId != null) {
+          const storeKey = options?.storeKey ?? targetId;
+          prevTextsRef.current.TextEditor[storeKey] = currText || '';
+        }
+        if (location === 'DevelopedTextPanel' && options?.storeKey != null) {
+          prevTextsRef.current.DevelopedTextPanel[options.storeKey] = currText || '';
+        }
+        if (location === 'ManualTextarea') prevTextsRef.current.ManualTextarea = currText || '';
+      }
+      delete diffTimersRef.current[key];
+    }, delay);
+  }, [dmpDiffCounts, logTextDiff, tokenize, loggingEnabled]);
+
+  // BLOCK_MOVE logging helper
+  const logBlockMove = useCallback((info) => {
+    if (!loggingEnabled) return;
+    const entry = {
+      type: 'BLOCK_REORDER',
+      ts: Date.now(),
+      sessionId: sessionIdRef.current,
+      writingMode,
+      location: 'TextEditor',
+      ...info,
+    };
+    aoiLogsRef.current.push(entry);
+    setLatestReorders(prev => [entry, ...prev].slice(0, 3));
+  }, [writingMode, loggingEnabled]);
+
+  const getRectFromEl = useCallback((el) => {
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { top: r.top, left: r.left, right: r.right, bottom: r.bottom };
+  }, []);
+
+  const buildAreas = useCallback(() => {
+    const areas = {};
+    if (writingMode === 'block') {
+      const topic = getRectFromEl(topicInputRef.current);
+      const grid = getRectFromEl(writingBlocksRef.current);
+      const editor = getRectFromEl(textEditorRef.current);
+      const dev = getRectFromEl(developedPanelRef.current);
+      if (topic) areas.TopicInput = topic;
+      if (grid) areas.WritingBlock = grid; // match requested name
+      if (editor) areas.TextEditor = editor;
+      if (dev) areas.DevelopedTextPanel = dev;
+    } else if (writingMode === 'ai-only') {
+      const topic = getRectFromEl(topicInputRef.current);
+      const dev = getRectFromEl(developedPanelRef.current);
+      if (topic) areas.TopicInput = topic;
+      if (dev) areas.DevelopedTextPanel = dev;
+    } else if (writingMode === 'manual') {
+      const manual = getRectFromEl(manualTextareaRef.current);
+      if (manual) areas.ManualTextarea = manual;
+    }
+    return areas;
+  }, [getRectFromEl, writingMode]);
+
+  const logAOIEntry = useCallback((reason = 'heartbeat') => {
+    if (!loggingEnabled) return;
+    const entry = {
+      ts: Date.now(),
+      sessionId: sessionIdRef.current,
+      type: 'AOI',
+      reason,
+      writingMode,
+      window: {
+        innerWidth: window.innerWidth,
+        innerHeight: window.innerHeight,
+        scrollX: window.scrollX,
+        scrollY: window.scrollY,
+        dpr: window.devicePixelRatio,
+      },
+      areas: buildAreas(),
+    };
+    aoiLogsRef.current.push(entry);
+  }, [buildAreas, writingMode, loggingEnabled]);
+
+  // Scroll/resize listeners + heartbeat
+  useEffect(() => {
+    if (!loggingEnabled) return;
+    const onScroll = () => logAOIEntry('scroll');
+    const onResize = () => logAOIEntry('resize');
+
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onResize);
+
+    const hb = setInterval(() => logAOIEntry('heartbeat'), 500);
+
+    // Initial capture
+    setTimeout(() => logAOIEntry('init'), 0);
+
+    return () => {
+      clearInterval(hb);
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onResize);
+    };
+  }, [logAOIEntry, loggingEnabled]);
+
+  // Layout-change via ResizeObserver on relevant AOIs
+  useEffect(() => {
+    if (!loggingEnabled) return;
+    const observers = [];
+
+    const observeEl = (el) => {
+      if (!el || typeof ResizeObserver === 'undefined') return;
+      const ro = new ResizeObserver(() => logAOIEntry('layout-change'));
+      ro.observe(el);
+      observers.push(ro);
+    };
+
+    if (writingMode === 'block') {
+      observeEl(topicInputRef.current);
+      observeEl(writingBlocksRef.current);
+      observeEl(textEditorRef.current);
+      observeEl(developedPanelRef.current);
+    } else if (writingMode === 'ai-only') {
+      observeEl(topicInputRef.current);
+      observeEl(developedPanelRef.current);
+    } else if (writingMode === 'manual') {
+      observeEl(manualTextareaRef.current);
+    }
+
+    // Log immediately when mode or dependencies change
+    logAOIEntry('mode-or-content-change');
+
+    return () => {
+      observers.forEach(o => o.disconnect());
+    };
+  }, [
+    loggingEnabled,
+    writingMode,
+    writingBlocks.length,
+    droppedBlocks.length,
+    expandedTextArray.length,
+    logAOIEntry,
+  ]);
+
+  const handleDownloadAOILog = useCallback(() => {
+    // Set filename using Brisbane, Australia time (UTC+10)
+    const brisbaneTime = new Date().toLocaleString('sv-SE', { timeZone: 'Australia/Brisbane' }).replace(' ', 'T');
+    const filename = `log_${brisbaneTime.replace(/[:.]/g, '-')}.json`;
+    const blob = new Blob([JSON.stringify(aoiLogsRef.current, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }, []);
 
   // Auto-connect when app loads
   useEffect(() => {
@@ -1892,13 +2070,24 @@ export default function App() {
         setOpenaiConnected(true);
       } catch (error) {
         console.warn('Auto-connection failed:', error.message);
-        // Show settings if auto-connection fails
         setShowSettings(true);
       }
     };
-    
     autoConnect();
   }, []);
+
+  // React to logging toggle: download when turning off, reset debug toggles
+  useEffect(() => {
+    if (!loggingEnabled) {
+      // Hide debug panels when logging stops
+      setShowDiffDebug(false);
+      setShowReorderDebug(false);
+      // Auto-download the current JSON log
+      if (aoiLogsRef.current.length > 0) {
+        handleDownloadAOILog();
+      }
+    }
+  }, [loggingEnabled, handleDownloadAOILog]);
 
   // Add handler for AI-only mode
   const handleAIOnlyGenerate = useCallback(async (prompt) => {
@@ -1911,6 +2100,14 @@ export default function App() {
     setError('');
     
     try {
+      // Build conversational messages using prior AI responses for continuity
+      const messages = buildMessagesForAIOnly(prompt, expandedTextArray);
+
+      const promptWithReference = `${prompt}
+      
+      For reference, this is the current text developed so far (if any):
+      ${expandedTextArray.join('\n\n')}`;
+
       const response = await fetch('/.netlify/functions/chat-completions', {
         method: 'POST',
         headers: {
@@ -1918,15 +2115,23 @@ export default function App() {
         },
         body: JSON.stringify({
           model: 'gpt-4o',
-          prompt: prompt,
+          // Keep backward compatibility with server expecting `prompt`
+          prompt: promptWithReference,
+          // Also send messages for continuity if server supports it
+          messages,
           maxTokens: 4000,
           temperature: 0.7
         }),
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+        try {
+          const errorData = await response.json();
+          throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+        } catch (_) {
+          const errorText = await response.text();
+          throw new Error(errorText || `HTTP error! status: ${response.status}`);
+        }
       }
 
       const data = await response.json();
@@ -1935,15 +2140,18 @@ export default function App() {
         throw new Error('Invalid response format from OpenAI API');
       }
 
-      const aiResponse = data.choices[0].message.content.trim();
-      setExpandedTextArray([aiResponse]);
+      const aiResponse = (data.choices?.[0]?.message?.content || '').trim();
+      const prev = prevTextsRef.current.DevelopedTextPanel['ai-only-0'] || '';
+      scheduleDebouncedDiff(`DP-0-ai`, prev, aiResponse, 'DevelopedTextPanel', 'ai', 1, 0, { storeKey: 'ai-only-0', blockId: null, indexId: 0 });
+      // Append to history for future continuity
+      setExpandedTextArray(prevArr => [...prevArr, aiResponse]);
     } catch (error) {
       console.error('Error generating AI response:', error);
       setError(`Failed to generate response: ${error.message}`);
     } finally {
       setIsGenerating(false);
     }
-  }, [openaiConnected]);
+  }, [openaiConnected, scheduleDebouncedDiff, buildMessagesForAIOnly, expandedTextArray]);
 
   // Helper functions to work with hierarchy
   const getParentBlocks = useCallback(() => {
@@ -2023,10 +2231,18 @@ export default function App() {
   }, []);
 
   const handleUpdateDroppedBlock = useCallback((index, updatedBlock) => {
+    try {
+      const id = updatedBlock?.id;
+      if (id != null) {
+        const prev = prevTextsRef.current.TextEditor[id] || '';
+        const curr = (updatedBlock.summary || '').toString();
+        scheduleDebouncedDiff(`TE-${id}-human`, prev, curr, 'TextEditor', 'human', id + 1, undefined, { storeKey: id, blockId: id, indexId: null });
+      }
+    } catch {}
     setDroppedBlocks(prev => prev.map((block, i) => 
       i === index ? updatedBlock : block
     ));
-  }, []);
+  }, [scheduleDebouncedDiff]);
 
   const handleDrop = useCallback((item, dropTarget = null) => {
     const newBlock = {
@@ -2036,6 +2252,13 @@ export default function App() {
       children: [],
       isDeveloped: false, // Add flag to check if this block has already been developed
     };
+
+    // Log AI diff for the dropped block's summary into TextEditor
+    try {
+      const curr = (newBlock.summary || '').toString();
+      const prev = prevTextsRef.current.TextEditor[newBlock.id] || '';
+      scheduleDebouncedDiff(`TE-${newBlock.id}-ai`, prev, curr, 'TextEditor', 'ai', newBlock.id + 1, 0, { storeKey: newBlock.id, blockId: newBlock.id, indexId: null });
+    } catch {}
 
     setDroppedBlocks(prev => {
       const updated = [...prev, newBlock];
@@ -2051,53 +2274,47 @@ export default function App() {
 
       return updated;
     });
-  }, []);
+  }, [scheduleDebouncedDiff]);
 
   const handleMove = useCallback((draggedItem, dropTarget) => {
     if (typeof draggedItem === 'number' && typeof dropTarget === 'number') {
-      // This is top-level block reordering (old signature)
+      // Top-level reorder
       setDroppedBlocks(prev => {
         const updated = [...prev];
-
-        // FIXED: Ensure we're only moving top-level blocks
         const draggedBlock = updated[draggedItem];
         const targetBlock = updated[dropTarget];
-
-        if (draggedBlock && targetBlock &&
-          !draggedBlock.parentId && !targetBlock.parentId) {
+        if (draggedBlock && targetBlock && !draggedBlock.parentId && !targetBlock.parentId) {
           const [removedBlock] = updated.splice(draggedItem, 1);
           updated.splice(dropTarget, 0, removedBlock);
+          logBlockMove({
+            moveType: 'reorder-top-level',
+            draggedBlockId: draggedBlock.id,
+            targetBlockId: targetBlock.id,
+            oldParentId: null,
+            newParentId: null
+          });
         }
-
-        // Clean up any undefined blocks
-        return updated.filter(block => block != null);
+        return updated.filter(b => b != null);
       });
     } else if (dropTarget?.type === 'child-zone') {
-      // This is dropping into child zone
+      // Move into child zone (become child)
       setDroppedBlocks(prev => {
         const updated = [...prev];
         const draggedBlock = updated.find(b => b && b.id === draggedItem.id);
-
         if (!draggedBlock) return prev;
-
-        // PREVENT: Don't allow parent blocks with children to become children
+        const oldParentId = draggedBlock.parentId || null;
+        // Prevent moving parent with children
         if (!draggedBlock.parentId && draggedBlock.children && draggedBlock.children.length > 0) {
           console.warn('Cannot move a parent block with children into a child zone');
-          return prev; // Don't allow the operation
+          return prev;
         }
-
-        // Remove from old parent if it had one
         if (draggedBlock.parentId) {
           const oldParent = updated.find(b => b && b.id === draggedBlock.parentId);
           if (oldParent && oldParent.children) {
             oldParent.children = oldParent.children.filter(id => id !== draggedBlock.id);
           }
         }
-
-        // Update block's parent
         draggedBlock.parentId = dropTarget.parentId;
-
-        // Add to new parent if applicable
         const newParent = updated.find(b => b && b.id === dropTarget.parentId);
         if (newParent) {
           if (!newParent.children) newParent.children = [];
@@ -2105,77 +2322,63 @@ export default function App() {
             newParent.children.push(draggedBlock.id);
           }
         }
-
-        // Clean up any undefined blocks
-        return updated.filter(block => block != null);
+        logBlockMove({
+          moveType: oldParentId === null ? 'demote-to-child' : 'child-reassign',
+          draggedBlockId: draggedBlock.id,
+          targetBlockId: dropTarget.parentId,
+          oldParentId,
+          newParentId: dropTarget.parentId
+        });
+        return updated.filter(b => b != null);
       });
     } else if (draggedItem.id && dropTarget.id && dropTarget.source === 'editor') {
-      // Handle all block movements including child reordering with position awareness
       setDroppedBlocks(prev => {
         const updated = [...prev];
         const draggedBlock = updated.find(b => b && b.id === draggedItem.id);
         const targetBlock = updated.find(b => b && b.id === dropTarget.id);
+        if (!draggedBlock || !targetBlock) return prev.filter(b => b != null);
+        const oldParentId = draggedBlock.parentId || null;
+        let moveType = 'unknown';
 
-        if (!draggedBlock || !targetBlock) {
-          console.warn('Could not find dragged or target block:', { draggedItem, dropTarget });
-          return prev.filter(block => block != null);
-        }
-
-        // Case 1: Both blocks have the same parent (child reordering)
         if (draggedBlock.parentId && draggedBlock.parentId === targetBlock.parentId) {
+          // Reorder children
           const parent = updated.find(b => b && b.id === draggedBlock.parentId);
-          if (parent && parent.children) {
-            const draggedIndex = parent.children.indexOf(draggedBlock.id);
-            const targetIndex = parent.children.indexOf(targetBlock.id);
-
-            if (draggedIndex !== -1 && targetIndex !== -1 && draggedIndex !== targetIndex) {
-              // Remove dragged block
-              parent.children.splice(draggedIndex, 1);
-              // Insert at target position
-              parent.children.splice(targetIndex, 0, draggedBlock.id);
+            if (parent && parent.children) {
+              const draggedIndex = parent.children.indexOf(draggedBlock.id);
+              const targetIndex = parent.children.indexOf(targetBlock.id);
+              if (draggedIndex !== -1 && targetIndex !== -1 && draggedIndex !== targetIndex) {
+                parent.children.splice(draggedIndex, 1);
+                parent.children.splice(targetIndex, 0, draggedBlock.id);
+                moveType = 'reorder-children';
+              }
             }
-          }
-        }
-        // Case 2: Moving child to top-level (child promotion)
-        else if (draggedBlock.parentId && !targetBlock.parentId) {
-          // Remove from old parent
+        } else if (draggedBlock.parentId && !targetBlock.parentId) {
+          // Promote child to top-level
           const oldParent = updated.find(b => b && b.id === draggedBlock.parentId);
           if (oldParent && oldParent.children) {
             oldParent.children = oldParent.children.filter(id => id !== draggedBlock.id);
           }
-
-          // Make it a top-level block
           draggedBlock.parentId = null;
-
-          // SIMPLIFIED: Just move it to right after the target block
           const targetIndex = updated.findIndex(b => b && b.id === targetBlock.id);
           if (targetIndex !== -1) {
-            // Remove from current position
             const draggedIndex = updated.findIndex(b => b && b.id === draggedBlock.id);
             if (draggedIndex !== -1) {
               updated.splice(draggedIndex, 1);
-              // Always insert after the target (feels more natural for promotion)
               const newTargetIndex = draggedIndex < targetIndex ? targetIndex : targetIndex + 1;
               updated.splice(newTargetIndex, 0, draggedBlock);
             }
           }
-        }
-        // Case 3: Moving top-level block to become a child
-        else if (!draggedBlock.parentId && targetBlock.parentId) {
-          // PREVENT: Don't allow parent blocks with children to become children
+          moveType = 'promote-child';
+        } else if (!draggedBlock.parentId && targetBlock.parentId) {
+          // Demote top-level to child
           if (draggedBlock.children && draggedBlock.children.length > 0) {
             console.warn('Cannot move a parent block with children to become a child');
-            return prev.filter(block => block != null);
+            return prev.filter(b => b != null);
           }
-
-          // Set the dragged block's parent to the same as target
           draggedBlock.parentId = targetBlock.parentId;
-
-          // Add to the parent's children array
           const newParent = updated.find(b => b && b.id === targetBlock.parentId);
           if (newParent) {
             if (!newParent.children) newParent.children = [];
-            // Insert before the target block
             const targetIndex = newParent.children.indexOf(targetBlock.id);
             if (targetIndex !== -1) {
               newParent.children.splice(targetIndex, 0, draggedBlock.id);
@@ -2183,17 +2386,13 @@ export default function App() {
               newParent.children.push(draggedBlock.id);
             }
           }
-        }
-        // Case 4: Moving child from one parent to another child (complex case)
-        else if (draggedBlock.parentId && targetBlock.parentId &&
-          draggedBlock.parentId !== targetBlock.parentId) {
-          // Remove from old parent
+          moveType = 'demote-to-child';
+        } else if (draggedBlock.parentId && targetBlock.parentId && draggedBlock.parentId !== targetBlock.parentId) {
+          // Move child between parents
           const oldParent = updated.find(b => b && b.id === draggedBlock.parentId);
           if (oldParent && oldParent.children) {
             oldParent.children = oldParent.children.filter(id => id !== draggedBlock.id);
           }
-
-          // Add to new parent
           draggedBlock.parentId = targetBlock.parentId;
           const newParent = updated.find(b => b && b.id === targetBlock.parentId);
           if (newParent) {
@@ -2205,13 +2404,21 @@ export default function App() {
               newParent.children.push(draggedBlock.id);
             }
           }
+          moveType = 'move-between-parents';
         }
 
-        // Clean up any undefined blocks at the end
-        return updated.filter(block => block != null);
+        logBlockMove({
+          moveType,
+          draggedBlockId: draggedBlock.id,
+          targetBlockId: targetBlock.id,
+          oldParentId,
+          newParentId: draggedBlock.parentId || null
+        });
+
+        return updated.filter(b => b != null);
       });
     }
-  }, []);
+  }, [logBlockMove]);
 
   const handleRemove = useCallback((index) => {
     setDroppedBlocks(prev => {
@@ -2246,6 +2453,11 @@ export default function App() {
     setDroppedBlocks(prev => [...prev, newBlock]);
     setCustomText('');
     setNextBlockId(prev => prev + 1);
+    // Log human diff for manual add (summary only)
+    try {
+      const prev = prevTextsRef.current.TextEditor[blockId] || '';
+      scheduleDebouncedDiff(`TE-${blockId}-human-add`, prev, text, 'TextEditor', 'human', blockId + 1, undefined, { storeKey: blockId, blockId, indexId: null });
+    } catch {}
     
     // Mark this block as having title generation in progress
     setGeneratingTitleForBlocks(prev => new Set([...prev, blockId]));
@@ -2287,7 +2499,7 @@ export default function App() {
         return newSet;
       });
     }
-  }, [customText, nextBlockId, openaiConnected]);
+  }, [customText, nextBlockId, openaiConnected, scheduleDebouncedDiff]);
 
   const handleDevelopText = useCallback(async () => {
     if (!openaiConnected) {
@@ -2299,8 +2511,34 @@ export default function App() {
     setError('');
     
     try {
-      const expanded = await expandTextWithOpenAI(droppedBlocks, currentTopic);
-      setExpandedTextArray(expanded);
+      const expanded = await expandTextWithOpenAI(
+        droppedBlocks,
+        currentTopic,
+        expandedTextArray
+      );
+      const parentBlocks = droppedBlocks.filter(block =>
+        block && (block.parentId === null || block.parentId === undefined)
+      );
+      // Log AI diffs per paragraph (include blockId and indexId)
+      (expanded || []).forEach((p, i) => {
+        const parentId = parentBlocks[i]?.id ?? null;
+        const prev = parentId != null ? (prevTextsRef.current.DevelopedTextPanel[parentId] || '') : '';
+        const curr = (p || '').toString();
+        scheduleDebouncedDiff(`DP-${parentId ?? i}-ai`, prev, curr, 'DevelopedTextPanel', 'ai', i + 1, 0, { storeKey: parentId, blockId: parentId, indexId: i });
+      });
+      // In AI-only mode, rewrite the first block only
+      if (writingMode === 'ai-only') {
+        const next = [...expandedTextArray];
+        const newParagraph = expanded?.[0] || '';
+        if (next.length === 0) {
+          setExpandedTextArray([newParagraph]);
+        } else {
+          next[0] = newParagraph;
+          setExpandedTextArray(next);
+        }
+      } else {
+        setExpandedTextArray(expanded);
+      }
 
       // Mark all parent blocks as developed
       setDroppedBlocks(prev => prev.map(block => {
@@ -2315,7 +2553,7 @@ export default function App() {
     } finally {
       setIsGenerating(false);
     }
-  }, [droppedBlocks, openaiConnected, currentTopic]);
+  }, [droppedBlocks, openaiConnected, currentTopic, scheduleDebouncedDiff]);
 
   const handleRegenerateBlock = useCallback(async (blockIndex) => {
     if (!openaiConnected) {
@@ -2374,10 +2612,22 @@ export default function App() {
         // Regenerate as cohesive paragraph
         const allContent = [parentBlockForRegeneration.summary, ...childBlocksForRegeneration.map(child => child.summary)];
 
+        // Include only the current developed text for this parent block (if any), not the full text
+        const parentBlocksForIndex = droppedBlocks.filter(block =>
+          block && (block.parentId === null || block.parentId === undefined)
+        );
+        const expandedTextIndexRef = parentBlocksForIndex.findIndex(block => block.id === parentBlockForRegeneration.id);
+        const currentExpandedTextForParent = expandedTextIndexRef !== -1 ? (expandedTextArray[expandedTextIndexRef] || '') : '';
+        const referenceSection = currentExpandedTextForParent && currentExpandedTextForParent.trim()
+          ? `\n\nFor reference, this is the current developed text for this block (if any):\n${currentExpandedTextForParent.trim()}`
+          : '';
+
         const prompt = `You are a clear and concise writer. Your goal is to write text that sounds natural to read out loud, using simple and direct language while staying polished and credible. Your task is to expand the following outline into a cohesive paragraph.
 
 Topic sentence: ${parentBlockForRegeneration.summary}
 Supporting points: ${childBlocksForRegeneration.map(child => `- ${child.summary}`).join('\n')}
+
+      ${referenceSection}
 
 Instructions:
 - Create a ${allContent.length * 1.5} sentence paragraph
@@ -2415,7 +2665,13 @@ Respond with only the expanded paragraph, no additional commentary or formatting
         newExpansion = data.choices[0].message.content.trim();
       } else {
         // This is a simple parent block without children - use single block regeneration
-        newExpansion = await regenerateSingleBlockExpansion(blockToRegenerate, currentTopic);
+        // Pass the current expanded paragraph for this block (if any) as reference
+        const parentBlocksForIndex = droppedBlocks.filter(block =>
+          block && (block.parentId === null || block.parentId === undefined)
+        );
+        const expandedTextIndexRef = parentBlocksForIndex.findIndex(block => block.id === blockToRegenerate.id);
+        const currentExpandedText = expandedTextIndexRef !== -1 ? (expandedTextArray[expandedTextIndexRef] || '') : '';
+        newExpansion = await regenerateSingleBlockExpansion(blockToRegenerate, currentTopic, currentExpandedText);
       }
 
       // Find the correct position in expandedTextArray
@@ -2428,8 +2684,14 @@ Respond with only the expanded paragraph, no additional commentary or formatting
       const expandedTextIndex = parentBlocks.findIndex(block => block.id === targetParentBlock.id);
 
       if (expandedTextIndex !== -1) {
-        // CHANGED: Check if this block has been developed before
+        // For already-developed blocks, treat as a true replacement at the same index
         if (targetParentBlock.isDeveloped) {
+          try {
+            const prev = prevTextsRef.current.DevelopedTextPanel[targetParentBlock.id] || '';
+            const curr = (newExpansion || '').toString();
+            // Use DMP-based diff; no replace mode
+            scheduleDebouncedDiff(`DP-${targetParentBlock.id}-ai-regen`, prev, curr, 'DevelopedTextPanel', 'ai', expandedTextIndex + 1, 0, { storeKey: targetParentBlock.id, blockId: targetParentBlock.id, indexId: expandedTextIndex });
+          } catch {}
           // Block was already developed - UPDATE at the position
           setExpandedTextArray(prev => {
             const newArray = [...prev];
@@ -2442,11 +2704,22 @@ Respond with only the expanded paragraph, no additional commentary or formatting
           });
         } else {
           // Block is NEW and hasn't been developed yet - INSERT at position
+          // Log as a pure addition (no removals due to index shift)
+          try {
+            const prev = '';
+            const curr = (newExpansion || '').toString();
+            scheduleDebouncedDiff(`DP-${targetParentBlock.id}-ai-insert`, prev, curr, 'DevelopedTextPanel', 'ai', expandedTextIndex + 1, 0, { storeKey: targetParentBlock.id, blockId: targetParentBlock.id, indexId: expandedTextIndex });
+          } catch {}
+
           setExpandedTextArray(prev => {
             const newArray = [...prev];
             newArray.splice(expandedTextIndex, 0, newExpansion);
             return newArray;
           });
+
+          // Align prevTexts indices to account for the insertion, so future diffs match positions
+          // Store baseline under blockId; no index shifting needed anymore
+          prevTextsRef.current.DevelopedTextPanel[targetParentBlock.id] = (newExpansion || '').toString();
 
           // Mark the block as developed
           setDroppedBlocks(prev => prev.map(block =>
@@ -2468,23 +2741,17 @@ Respond with only the expanded paragraph, no additional commentary or formatting
         return newSet;
       });
     }
-  }, [droppedBlocks, openaiConnected, currentTopic]);
+  }, [droppedBlocks, openaiConnected, currentTopic, scheduleDebouncedDiff]);
 
   const handleCopyToClipboard = useCallback(async () => {
-    if (expandedTextArray.length === 0) return;
-
-    const fullText = expandedTextArray.join('\n\n').trim();
-
     try {
-      await navigator.clipboard.writeText(fullText);
+      const text = expandedTextArray.join('\n\n').trim();
+      if (!text) return;
+      await navigator.clipboard.writeText(text);
       setCopiedToClipboard(true);
-
-      // Reset the feedback after 2 seconds
-      setTimeout(() => {
-        setCopiedToClipboard(false);
-      }, 2000);
-    } catch (error) {
-      console.error('Failed to copy to clipboard:', error);
+      setTimeout(() => setCopiedToClipboard(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy to clipboard:', err);
       setError('Failed to copy text to clipboard');
     }
   }, [expandedTextArray]);
@@ -2533,45 +2800,122 @@ Respond with only the expanded paragraph, no additional commentary or formatting
               <button
                 onClick={() => setShowSettings(!showSettings)}
                 className={`p-2 rounded-md transition-colors ${openaiConnected
-                    ? 'text-green-600 hover:text-green-800 hover:bg-green-100'
-                    : 'text-gray-600 hover:text-gray-800 hover:bg-gray-100'
-                  }`}
+                  ? 'text-green-600 hover:text-green-800 hover:bg-green-100'
+                  : 'text-gray-600 hover:text-gray-800 hover:bg-gray-100'}`}
                 title="Settings"
               >
                 <Settings size={20} />
               </button>
+
+              {/* Logging Toggle */}
+              <button
+                onClick={() => setLoggingEnabled(prev => !prev)}
+                className={`px-3 py-1.5 rounded text-[12px] font-['Chivo:Bold',_sans-serif] ${loggingEnabled ? 'bg-blue-100 text-blue-700 hover:bg-blue-200' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                title={loggingEnabled ? 'Stop logging' : 'Start logging'}
+              >
+                {loggingEnabled ? 'Stop Logging' : 'Start Logging'}
+              </button>
+
+              {loggingEnabled && (
+                <>
+                  <button
+                    onClick={() => setShowDiffDebug(v => !v)}
+                    className="px-3 py-1.5 rounded text-[12px] font-['Chivo:Bold',_sans-serif] bg-gray-100 hover:bg-gray-200 text-gray-700"
+                    title="Toggle diff debug panel"
+                  >
+                    {showDiffDebug ? 'Hide Diff Debug' : 'Show Diff Debug'}
+                  </button>
+                  <button
+                    onClick={() => setShowReorderDebug(v => !v)}
+                    className="px-3 py-1.5 rounded text-[12px] font-['Chivo:Bold',_sans-serif] bg-gray-100 hover:bg-gray-200 text-gray-700"
+                    title="Toggle reorder debug panel"
+                  >
+                    {showReorderDebug ? 'Hide Reorder Debug' : 'Show Reorder Debug'}
+                  </button>
+                </>
+              )}
             </div>
           </div>
 
-          {/* AI Settings Panel */}
-          {showSettings && (
-            <AISettingsPanel
-              onConnectionChange={handleConnectionChange}
-            />
+          {showDiffDebug && latestDiffs.length > 0 && (
+            <div className="mb-6 border border-blue-200 bg-blue-50 text-blue-800 rounded p-4 text-sm">
+              <div className="font-bold mb-2">Recent TEXT_DIFFs (last 3)</div>
+              <div className="space-y-4">
+                {latestDiffs.map((d, idx) => (
+                  <div key={idx} className="grid grid-cols-1 md:grid-cols-2 gap-3 border border-blue-100 rounded p-3 bg-white">
+                    <div>
+                      <div className="text-xs text-gray-600">Location / By / Target</div>
+                      <div>{d.location} / {d.by} / {d.targetId}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-600">IDs</div>
+                      <div>Block ID: {d.blockId ?? '—'} · Index: {d.indexId ?? '—'}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-600">Counts</div>
+                      <div>Added: {d.addedWords} · Removed: {d.removedWords}</div>
+                    </div>
+                    <div className="md:col-span-1">
+                      <div className="text-xs text-gray-600">Prev</div>
+                      <pre className="whitespace-pre-wrap break-words bg-gray-50 border border-blue-100 rounded p-2 text-gray-900">{d.prevText}</pre>
+                    </div>
+                    <div className="md:col-span-1">
+                      <div className="text-xs text-gray-600">Curr</div>
+                      <pre className="whitespace-pre-wrap break-words bg-gray-50 border border-blue-100 rounded p-2 text-gray-900">{d.currText}</pre>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
 
-          {/* Error display */}
+          {showReorderDebug && latestReorders.length > 0 && (
+            <div className="mb-6 border border-purple-200 bg-purple-50 text-purple-800 rounded p-4 text-sm">
+              <div className="font-bold mb-2">Recent BLOCK_REORDERs (last 3)</div>
+              <div className="space-y-3">
+                {latestReorders.map((r, idx) => (
+                  <div key={idx} className="grid grid-cols-1 md:grid-cols-3 gap-3 border border-purple-100 rounded p-3 bg-white">
+                    <div>
+                      <div className="text-xs text-gray-600">Move Type</div>
+                      <div>{r.moveType}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-600">Dragged / Target</div>
+                      <div>{r.draggedBlockId} → {r.targetBlockId}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-600">Parent Change</div>
+                      <div>{String(r.oldParentId)} → {String(r.newParentId)}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-6">
-              <p className="font-['Chivo:Regular',_sans-serif] text-[14px]">{error}</p>
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-6 text-sm">
+              {error}
             </div>
           )}
 
           {/* Block Writing Mode */}
           {writingMode === 'block' && (
             <>
-              {/* Full-width top section */}
               <div className="space-y-6 mb-8">
-                {/* Topic Input */}
                 <TopicInput
+                  ref={topicInputRef}
                   onGenerateBlocks={handleGenerateBlocks}
                   isGenerating={isGeneratingBlocks}
                   openaiConnected={openaiConnected}
                   mode="block"
+                  onTopicChange={(text) => {
+                    const prev = prevTextsRef.current.TopicInput || '';
+                    scheduleDebouncedDiff('TopicInput', prev, (text || '').toString(), 'TopicInput', 'human', 'topic');
+                  }}
                 />
 
-                {/* Writing blocks grid */}
-                <div className="w-full">
+                <div className="w-full" ref={writingBlocksRef}>
                   {writingBlocks.length > 0 && (
                     <>
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 mb-2">
@@ -2626,14 +2970,13 @@ Respond with only the expanded paragraph, no additional commentary or formatting
                 </div>
               </div>
 
-              {/* Two-column layout */}
               <div className="grid grid-cols-2 gap-8">
-                {/* Left Column - Text Editor and Develop Button */}
                 <div>
                   <h4 className="font-['Chivo:Bold',_sans-serif] text-[14px] text-[#000000] mb-3">
                     Your Writing Draft
                   </h4>
                   <TextEditor
+                    ref={textEditorRef}
                     droppedBlocks={droppedBlocks}
                     onDrop={handleDrop}
                     onMove={handleMove}
@@ -2654,7 +2997,6 @@ Respond with only the expanded paragraph, no additional commentary or formatting
                   />
                 </div>
 
-                {/* Right Column - Developed Text */}
                 <div>
                   <div className="flex justify-between items-center mb-3">
                     <h4 className="font-['Chivo:Bold',_sans-serif] text-[14px] text-[#000000]">
@@ -2662,26 +3004,36 @@ Respond with only the expanded paragraph, no additional commentary or formatting
                     </h4>
                     {expandedTextArray.length > 0 && (
                       <div className="flex items-center gap-2">
-                        <div className="font-['Chivo:Regular',_sans-serif] text-[12px] text-[#666666]">
-                          {expandedTextArray.join('\n\n').trim().split(/\s+/).filter(word => word.length > 0).length} words
+                        <div className="text-xs text-[#666]">
+                          {expandedTextArray.join('\n\n').trim().split(/\s+/).filter(Boolean).length} words
                         </div>
                         <button
                           onClick={handleCopyToClipboard}
                           className="p-1.5 rounded hover:bg-gray-100 transition-colors text-gray-600 hover:text-blue-600"
                           title="Copy to clipboard"
                         >
-                          {copiedToClipboard ? (
-                            <Check size={16} className="text-green-600" />
-                          ) : (
-                            <Copy size={16} />
-                          )}
+                          {copiedToClipboard ? <Check size={16} className="text-green-600" /> : <Copy size={16} />}
                         </button>
                       </div>
                     )}
                   </div>
                   <DevelopedTextPanel
+                    ref={developedPanelRef}
                     expandedTextArray={expandedTextArray}
-                    onTextChange={setExpandedTextArray}
+                    onTextChange={(newArray) => {
+                      (newArray || []).forEach((val, i) => {
+                        const parentBlocks = droppedBlocks.filter(block =>
+                          block && (block.parentId === null || block.parentId === undefined)
+                        );
+                        const parentId = parentBlocks[i]?.id ?? null;
+                        const prev = parentId != null ? (prevTextsRef.current.DevelopedTextPanel[parentId] || '') : '';
+                        const curr = (val || '').toString();
+                        if (prev !== curr) {
+                          scheduleDebouncedDiff(`DP-${parentId ?? i}-human`, prev, curr, 'DevelopedTextPanel', 'human', i + 1, undefined, { storeKey: parentId, blockId: parentId, indexId: i });
+                        }
+                      });
+                      setExpandedTextArray(newArray);
+                    }}
                     isGenerating={isGenerating}
                   />
                 </div>
@@ -2689,16 +3041,16 @@ Respond with only the expanded paragraph, no additional commentary or formatting
             </>
           )}
 
-          {/* Manual Writing Mode */}
+          {/* Manual Mode */}
           {writingMode === 'manual' && (
-            <div className="max-w-4xl mx-auto">
+            <div className="max-w-4xl mx-auto" >
               <div className="flex justify-between items-center mb-3">
                 <h4 className="font-['Chivo:Bold',_sans-serif] text-[14px] text-[#000000]">
                   Manual Writing
                 </h4>
                 <div className="flex items-center gap-2">
-                  <div className="font-['Chivo:Regular',_sans-serif] text-[12px] text-[#666666]">
-                    {manualText.trim().split(/\s+/).filter(word => word.length > 0).length} words
+                  <div className="text-xs text-[#666]">
+                    {manualText.trim().split(/\s+/).filter(Boolean).length} words
                   </div>
                   <button
                     onClick={async () => {
@@ -2707,72 +3059,83 @@ Respond with only the expanded paragraph, no additional commentary or formatting
                         await navigator.clipboard.writeText(manualText);
                         setCopiedToClipboard(true);
                         setTimeout(() => setCopiedToClipboard(false), 2000);
-                      } catch (error) {
-                        console.error('Failed to copy to clipboard:', error);
+                      } catch (err) {
+                        console.error('Failed to copy to clipboard:', err);
                         setError('Failed to copy text to clipboard');
                       }
                     }}
                     className="p-1.5 rounded hover:bg-gray-100 transition-colors text-gray-600 hover:text-blue-600"
                     title="Copy to clipboard"
                   >
-                    {copiedToClipboard ? (
-                      <Check size={16} className="text-green-600" />
-                    ) : (
-                      <Copy size={16} />
-                    )}
+                    {copiedToClipboard ? <Check size={16} className="text-green-600" /> : <Copy size={16} />}
                   </button>
                 </div>
               </div>
               <textarea
+                ref={manualTextareaRef}
                 value={manualText}
-                onChange={(e) => setManualText(e.target.value)}
-                className="w-full min-h-[600px] p-6 border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 font-['Chivo:Regular',_sans-serif] text-[14px] leading-6"
+                onChange={(e) => {
+                  const curr = (e.target.value || '').toString();
+                  const prev = prevTextsRef.current.ManualTextarea || '';
+                  // Log human diff in manual mode
+                  scheduleDebouncedDiff('ManualTextarea', prev, curr, 'ManualTextarea', 'human', 'manual');
+                  setManualText(curr);
+                }}
+                className="w-full min-h-[600px] p-6 border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 text-[14px] leading-6"
                 placeholder="Start writing your text here..."
               />
             </div>
           )}
 
-          {/* AI-Only Mode */}
+          {/* AI-only Mode */}
           {writingMode === 'ai-only' && (
             <>
-              {/* AI Prompt Input - Full Width */}
               <div className="mb-6">
                 <TopicInput
+                  ref={topicInputRef}
                   onGenerateBlocks={handleAIOnlyGenerate}
                   isGenerating={isGenerating}
                   openaiConnected={openaiConnected}
                   mode="ai-only"
+                  onTopicChange={(text) => {
+                    const prev = prevTextsRef.current.TopicInput || '';
+                    scheduleDebouncedDiff('TopicInput', prev, (text || '').toString(), 'TopicInput', 'human', 'topic');
+                  }}
                 />
               </div>
-
-              {/* AI Response - Centered with max width */}
               <div className="max-w-4xl mx-auto">
                 <div className="flex justify-between items-center mb-3">
-                  <h4 className="font-['Chivo:Bold',_sans-serif] text-[14px] text-[#000000]">
-                    AI Response
-                  </h4>
+                  <h4 className="font-['Chivo:Bold',_sans-serif] text-[14px] text-[#000000]">AI Response</h4>
                   {expandedTextArray.length > 0 && (
                     <div className="flex items-center gap-2">
-                      <div className="font-['Chivo:Regular',_sans-serif] text-[12px] text-[#666666]">
-                        {expandedTextArray.join('\n\n').trim().split(/\s+/).filter(word => word.length > 0).length} words
+                      <div className="text-xs text-[#666]">
+                        {expandedTextArray.join('\n\n').trim().split(/\s+/).filter(Boolean).length} words
                       </div>
                       <button
                         onClick={handleCopyToClipboard}
                         className="p-1.5 rounded hover:bg-gray-100 transition-colors text-gray-600 hover:text-blue-600"
                         title="Copy to clipboard"
                       >
-                        {copiedToClipboard ? (
-                          <Check size={16} className="text-green-600" />
-                        ) : (
-                          <Copy size={16} />
-                        )}
+                        {copiedToClipboard ? <Check size={16} className="text-green-600" /> : <Copy size={16} />}
                       </button>
                     </div>
                   )}
                 </div>
                 <DevelopedTextPanel
+                  ref={developedPanelRef}
                   expandedTextArray={expandedTextArray}
-                  onTextChange={setExpandedTextArray}
+                  onTextChange={(newArray) => {
+                    (newArray || []).forEach((val, i) => {
+                      // In AI-only mode, there is no parentId; use a stable storeKey
+                      const storeKey = 'ai-only-0';
+                      const prev = prevTextsRef.current.DevelopedTextPanel[storeKey] || '';
+                      const curr = (val || '').toString();
+                      if (prev !== curr) {
+                        scheduleDebouncedDiff(`DP-ai-only-${i}-human`, prev, curr, 'DevelopedTextPanel', 'human', i + 1, undefined, { storeKey, blockId: null, indexId: i });
+                      }
+                    });
+                    setExpandedTextArray(newArray);
+                  }}
                   isGenerating={isGenerating}
                 />
               </div>
