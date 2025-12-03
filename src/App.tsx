@@ -561,7 +561,7 @@ async function testOpenAIConnection() {
   }
 }
 
-async function expandTextWithOpenAI(blocks, topic, existingExpandedTextArray = []) {
+async function expandTextWithOpenAI(blocks, topic, existingExpandedTextArray = [], onProgress) {
   // Get parent blocks for expansion
   const parentBlocks = blocks.filter(block => 
     block && (block.parentId === null || block.parentId === undefined)
@@ -638,6 +638,9 @@ Respond with only the expanded paragraph, no additional commentary or formatting
 
       const expansion = data.choices[0].message.content.trim();
       expandedParagraphs.push(expansion);
+      if (typeof onProgress === 'function') {
+        try { onProgress(i, expansion); } catch {}
+      }
     } else {
       // Simple parent block - expand normally using existing function
       // Pass only the current developed text for this parent (if any)
@@ -646,6 +649,9 @@ Respond with only the expanded paragraph, no additional commentary or formatting
         : '';
       const expansion = await regenerateSingleBlockExpansion(parent, topic, currentExpandedText);
       expandedParagraphs.push(expansion);
+      if (typeof onProgress === 'function') {
+        try { onProgress(i, expansion); } catch {}
+      }
     }
   }
   
@@ -1684,7 +1690,7 @@ const DevelopedTextPanel = React.forwardRef(function DevelopedTextPanel({ expand
             <textarea
               value={item}
               onChange={(e) => handleItemChange(index, e.target.value)}
-              className={`developed-text-textarea flex-1 p-4 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 font-['Chivo:Regular',_sans-serif] text-[14px] leading-6 bg-white transition-all duration-300 overflow-hidden ${isGenerating ? 'blur-sm opacity-75' : ''}`}
+              className={`developed-text-textarea flex-1 p-4 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 font-['Chivo:Regular',_sans-serif] text-[14px] leading-6 bg-white transition-all duration-300 overflow-hidden ${(isGenerating && !(item && item.toString().trim().length > 0)) ? 'blur-sm opacity-75' : ''}`}
               style={{
                 minHeight: '60px',
                 height: 'auto',
@@ -2511,10 +2517,32 @@ export default function App() {
     setError('');
     
     try {
+      // Prepare array length to show placeholders and enable progressive updates
+      const parentBlocksInit = droppedBlocks.filter(block =>
+        block && (block.parentId === null || block.parentId === undefined)
+      );
+      // Initialize array to correct length for progressive fill
+      setExpandedTextArray(prev => {
+        const next = [...prev];
+        while (next.length < parentBlocksInit.length) next.push('');
+        if (next.length > parentBlocksInit.length) next.splice(parentBlocksInit.length);
+        return next;
+      });
+
       const expanded = await expandTextWithOpenAI(
         droppedBlocks,
         currentTopic,
-        expandedTextArray
+        expandedTextArray,
+        (index, text) => {
+          // Update UI as each block finishes
+          setExpandedTextArray(prev => {
+            const next = [...prev];
+            // Ensure array length
+            while (next.length <= index) next.push('');
+            next[index] = text;
+            return next;
+          });
+        }
       );
       const parentBlocks = droppedBlocks.filter(block =>
         block && (block.parentId === null || block.parentId === undefined)
