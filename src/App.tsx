@@ -1,5 +1,6 @@
 // @ts-nocheck
 import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { diff_match_patch, DIFF_INSERT, DIFF_DELETE } from 'diff-match-patch';
 import { DndProvider, useDrag, useDrop } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { Settings, RotateCcw, Copy, Check } from 'lucide-react';
@@ -560,15 +561,16 @@ async function testOpenAIConnection() {
   }
 }
 
-async function expandTextWithOpenAI(blocks, topic) {
-  // Get only parent blocks for expansion
+async function expandTextWithOpenAI(blocks, topic, existingExpandedTextArray = []) {
+  // Get parent blocks for expansion
   const parentBlocks = blocks.filter(block => 
     block && (block.parentId === null || block.parentId === undefined)
   );
   
   const expandedParagraphs = [];
-  
-  for (const parent of parentBlocks) {
+  // Iterate with index to map to existing expanded text array
+  for (let i = 0; i < parentBlocks.length; i++) {
+    const parent = parentBlocks[i];
     // Get children for this parent
     const children = blocks.filter(block => 
       block && block.parentId === parent.id
@@ -578,6 +580,14 @@ async function expandTextWithOpenAI(blocks, topic) {
       // Parent with children - create cohesive paragraph
       const allContent = [parent.summary, ...children.map(child => child.summary)];
       
+      // Include only the current developed text for THIS parent block (if any)
+      const currentExpandedText = Array.isArray(existingExpandedTextArray)
+        ? (existingExpandedTextArray[i] || '')
+        : '';
+      const referenceTextSection = currentExpandedText && currentExpandedText.trim()
+        ? `\n\nFor reference, this is the current developed text for this block (if any):\n${currentExpandedText.trim()}`
+        : '';
+
       const prompt = `You are a clear and concise writer. 
 
 Your goal is to write text that sounds natural to read out loud, using simple and direct language while staying polished and credible. 
@@ -585,6 +595,8 @@ Your task is to expand the following outline into a cohesive paragraph.
 
 Topic sentence: ${parent.summary}
 Supporting points: ${children.map(child => `- ${child.summary}`).join('\n')}
+
+${referenceTextSection}
 
 Instructions:
 - Create a ${allContent.length * 1.5} sentence paragraph
@@ -609,8 +621,13 @@ Respond with only the expanded paragraph, no additional commentary or formatting
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+        try {
+          const errorData = await response.json();
+          throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+        } catch (_) {
+          const errorText = await response.text();
+          throw new Error(errorText || `HTTP error! status: ${response.status}`);
+        }
       }
 
       const data = await response.json();
@@ -623,7 +640,11 @@ Respond with only the expanded paragraph, no additional commentary or formatting
       expandedParagraphs.push(expansion);
     } else {
       // Simple parent block - expand normally using existing function
-      const expansion = await regenerateSingleBlockExpansion(parent, topic);
+      // Pass only the current developed text for this parent (if any)
+      const currentExpandedText = Array.isArray(existingExpandedTextArray)
+        ? (existingExpandedTextArray[i] || '')
+        : '';
+      const expansion = await regenerateSingleBlockExpansion(parent, topic, currentExpandedText);
       expandedParagraphs.push(expansion);
     }
   }
@@ -632,9 +653,15 @@ Respond with only the expanded paragraph, no additional commentary or formatting
 }
 
 // Regenerate expansion for a single block
-async function regenerateSingleBlockExpansion(block, topic) {
+// Optionally include the current expanded text for this block as reference
+async function regenerateSingleBlockExpansion(block, topic, currentExpandedText = '') {
 
   // Create a prompt for expanding just one block
+
+  const referenceSection = currentExpandedText && currentExpandedText.trim()
+    ? `\n\nFor reference, this is the current text developed for this block (if any)::\n${currentExpandedText.trim()}`
+    : '';
+
   const prompt = `You are a clear and concise writer. Your goal is to write text that sounds natural to read out loud, using simple and direct language while staying polished and credible. Your task is to expand the following outline point into 1–2 natural, readable sentences.
 
 Each expansion should:
@@ -643,6 +670,8 @@ Each expansion should:
 
 Outline point to expand:
 ${block.summary}
+
+${referenceSection}
 
 Instructions:
 - Use plain, everyday English (aim for clarity, not elegance)
@@ -886,7 +915,7 @@ function EditableText({ value, onSave, placeholder, className, isTitle = false, 
 }
 
 // Topic Input Component
-const TopicInput = React.forwardRef(function TopicInput({ onGenerateBlocks, isGenerating, openaiConnected, mode }, ref) {
+const TopicInput = React.forwardRef(function TopicInput({ onGenerateBlocks, isGenerating, openaiConnected, mode, onTopicChange }, ref) {
   const [topic, setTopic] = useState('');
   const textareaRef = useRef(null);
 
@@ -925,6 +954,7 @@ const TopicInput = React.forwardRef(function TopicInput({ onGenerateBlocks, isGe
 
   const handleChange = (e) => {
     setTopic(e.target.value);
+    if (onTopicChange) onTopicChange(e.target.value);
     setTimeout(adjustTextareaHeight, 0);
   };
 
@@ -1146,27 +1176,18 @@ function DroppedBlock({
   // Separate drop zones for reordering
   const [{ isOver: isOverTop }, dropTop] = useDrop({
     accept: 'dropped-block',
-    hover: (draggedItem) => {
-      if (!draggedItem || !draggedItem.id || draggedItem.id === block.id) return;
-
-      // Only proceed if we have valid blocks
-      const draggedBlock = droppedBlocks.find(b => b && b.id === draggedItem.id);
+    drop: (draggedItem, monitor) => {
+      const item = monitor.getItem();
+      if (!item || item.id === block.id || item.source !== 'editor') return;
+      const draggedBlock = droppedBlocks.find(b => b && b.id === item.id);
       if (!draggedBlock) return;
-
-      // Check if both blocks are children of the same parent
-      if (draggedBlock.parentId && block.parentId &&
-        draggedBlock.parentId === block.parentId) {
-        // This is child reordering - use ID-based approach
-        onMove(draggedItem, { ...block, source: 'editor' });
-      } else if (!draggedBlock.parentId && !block.parentId) {
-        // This is top-level reordering - use index-based approach
-        if (draggedItem.index !== index && draggedItem.index !== index - 1) {
-          onMove(draggedItem.index, index);
-          draggedItem.index = index;
-        }
+      // If same parent, or cross-hierarchy, delegate to onMove with IDs
+      if ((draggedBlock.parentId && block.parentId && draggedBlock.parentId === block.parentId) ||
+          (draggedBlock.parentId !== block.parentId)) {
+        onMove(item, { ...block, source: 'editor' });
       } else {
-        // Cross-hierarchy move (child to parent or vice versa)
-        onMove(draggedItem, { ...block, source: 'editor' });
+        // Top-level reorder: place above target index
+        onMove(item.index, index);
       }
     },
     collect: (monitor) => ({
@@ -1176,31 +1197,17 @@ function DroppedBlock({
 
   const [{ isOver: isOverBottom }, dropBottom] = useDrop({
     accept: 'dropped-block',
-    hover: (draggedItem) => {
-      if (!draggedItem || !draggedItem.id || draggedItem.id === block.id) return;
-
-      // Only proceed if we have valid blocks
-      const draggedBlock = droppedBlocks.find(b => b && b.id === draggedItem.id);
+    drop: (draggedItem, monitor) => {
+      const item = monitor.getItem();
+      if (!item || item.id === block.id || item.source !== 'editor') return;
+      const draggedBlock = droppedBlocks.find(b => b && b.id === item.id);
       if (!draggedBlock) return;
-
-      // Check if both blocks are children of the same parent
-      if (draggedBlock.parentId && block.parentId &&
-        draggedBlock.parentId === block.parentId) {
-        // This is child reordering - use ID-based approach
-        onMove(draggedItem, { ...block, source: 'editor' });
-      } else if (!draggedBlock.parentId && !block.parentId) {
-        // This is top-level reordering - use index-based approach
-        // FIXED: Properly handle moving down for parent blocks with children
-        const draggedIndex = droppedBlocks.findIndex(b => b && b.id === draggedBlock.id);
-        const targetIndex = droppedBlocks.findIndex(b => b && b.id === block.id);
-
-        if (draggedIndex !== -1 && targetIndex !== -1 && draggedIndex !== targetIndex + 1) {
-          onMove(draggedIndex, targetIndex + 1);
-          draggedItem.index = targetIndex + 1;
-        }
+      if ((draggedBlock.parentId && block.parentId && draggedBlock.parentId === block.parentId) ||
+          (draggedBlock.parentId !== block.parentId)) {
+        onMove(item, { ...block, source: 'editor' });
       } else {
-        // Cross-hierarchy move (child to parent or vice versa)
-        onMove(draggedItem, { ...block, source: 'editor' });
+        const targetIndex = index + 1;
+        onMove(item.index, targetIndex);
       }
     },
     collect: (monitor) => ({
@@ -1770,6 +1777,13 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [writingMode, setWritingMode] = useState('block'); // 'block' | 'manual' | 'ai-only'
   const [manualText, setManualText] = useState('');
+  const [loggingEnabled, setLoggingEnabled] = useState(false);
+  // Diff debug toggle and latest diffs (rolling 3)
+  const [showDiffDebug, setShowDiffDebug] = useState(false);
+  const [latestDiffs, setLatestDiffs] = useState([]);
+  // Reorder debug toggle and latest reorders (rolling 3)
+  const [showReorderDebug, setShowReorderDebug] = useState(false);
+  const [latestReorders, setLatestReorders] = useState([]);
 
   // AOI refs
   const topicInputRef = useRef(null);
@@ -1781,6 +1795,148 @@ export default function App() {
   // AOI logs
   const aoiLogsRef = useRef([]);
   const sessionIdRef = useRef(`session-${Date.now()}`);
+
+  // TEXT_DIFF tracking
+  const prevTextsRef = useRef({
+    TopicInput: '',
+    TextEditor: {},
+    DevelopedTextPanel: {},
+    ManualTextarea: ''
+  });
+  const diffTimersRef = useRef({});
+
+  const tokenize = useCallback((s) => {
+    if (!s) return [];
+    return s.toString().trim().split(/\s+/).filter(Boolean);
+  }, []);
+
+  const dmpRef = useRef<diff_match_patch | null>(null);
+
+  useEffect(() => {
+    dmpRef.current = new diff_match_patch();
+  }, []);
+
+  // AI-only mode should rewrite the first block only.
+  // If multiple items appear due to appending, keep only the latest.
+  useEffect(() => {
+    if (writingMode === 'ai-only' && Array.isArray(expandedTextArray) && expandedTextArray.length > 1) {
+      const latest = expandedTextArray[expandedTextArray.length - 1];
+      setExpandedTextArray([latest]);
+    }
+  }, [expandedTextArray, writingMode]);
+
+  // Conversational continuity settings for AI-only mode
+  const MAX_HISTORY_TOKENS = 3000; // approx cap for prior assistant outputs
+
+  const buildMessagesForAIOnly = useCallback((prompt: string, historyText: string[]) => {
+    const system = {
+      role: 'system',
+      content: 'You are a clear, concise writing assistant. Continue the conversation naturally in plain, everyday English.'
+    };
+
+    const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [system];
+
+    // Add recent assistant outputs (most recent last), truncated by rough token estimate
+    let tokenEstimate = 0;
+    const startIdx = Math.max(0, historyText.length - 10);
+    for (let i = startIdx; i < historyText.length; i++) {
+      const content = (historyText[i] || '').toString();
+      const words = content.trim().split(/\s+/).filter(Boolean).length;
+      const approxTokens = Math.round(words * 1.3);
+      if (tokenEstimate + approxTokens > MAX_HISTORY_TOKENS) break;
+      messages.push({ role: 'assistant', content });
+      tokenEstimate += approxTokens;
+    }
+
+    messages.push({ role: 'user', content: prompt });
+    return messages;
+  }, []);
+
+  
+
+  const dmpDiffCounts = useCallback((prev, curr) => {
+    const dmp = dmpRef.current;
+    if (!dmp) return { addedWords: 0, removedWords: 0 };
+    const diffs = dmp.diff_main((prev || '').toString(), (curr || '').toString());
+    dmp.diff_cleanupSemantic(diffs);
+    let added = 0, removed = 0;
+    for (const [op, text] of diffs) {
+      if (op === DIFF_INSERT) added += tokenize(text).length;
+      else if (op === DIFF_DELETE) removed += tokenize(text).length;
+    }
+    return { addedWords: added, removedWords: removed };
+  }, [tokenize]);
+
+  const logTextDiff = useCallback(({ location, by, addedWords, removedWords, targetId, blockId = null, indexId = null }) => {
+    if (!loggingEnabled) return;
+    aoiLogsRef.current.push({
+      type: 'TEXT_DIFF',
+      ts: Date.now(),
+      sessionId: sessionIdRef.current,
+      writingMode,
+      location,
+      by,
+      addedWords,
+      removedWords,
+      targetId,
+      blockId,
+      indexId,
+    });
+  }, [writingMode, loggingEnabled]);
+
+  const scheduleDebouncedDiff = useCallback((key, prevText, currText, location, by, targetId, delay = 800, options = {}) => {
+    if (by === 'ai') {
+      const { addedWords, removedWords } = dmpDiffCounts(prevText, currText);
+      if (loggingEnabled && (addedWords || removedWords)) {
+        logTextDiff({ location, by, addedWords, removedWords, targetId, blockId: options?.blockId ?? null, indexId: options?.indexId ?? null });
+        setLatestDiffs(prev => [{ location, by, targetId, blockId: options?.blockId ?? null, indexId: options?.indexId ?? null, prevText: prevText || '', currText: currText || '', addedWords, removedWords }, ...prev].slice(0, 3));
+      }
+      if (location === 'TopicInput') prevTextsRef.current.TopicInput = currText || '';
+      if (location === 'TextEditor' && targetId != null) {
+        const storeKey = options?.storeKey ?? targetId;
+        prevTextsRef.current.TextEditor[storeKey] = currText || '';
+      }
+      if (location === 'DevelopedTextPanel' && options?.storeKey != null) {
+        prevTextsRef.current.DevelopedTextPanel[options.storeKey] = currText || '';
+      }
+      if (location === 'ManualTextarea') prevTextsRef.current.ManualTextarea = currText || '';
+      return;
+    }
+
+    if (diffTimersRef.current[key]) clearTimeout(diffTimersRef.current[key]);
+    diffTimersRef.current[key] = window.setTimeout(() => {
+      const { addedWords, removedWords } = dmpDiffCounts(prevText, currText);
+      if (loggingEnabled && (addedWords || removedWords)) {
+        logTextDiff({ location, by, addedWords, removedWords, targetId, blockId: options?.blockId ?? null, indexId: options?.indexId ?? null });
+        setLatestDiffs(prev => [{ location, by, targetId, blockId: options?.blockId ?? null, indexId: options?.indexId ?? null, prevText: prevText || '', currText: currText || '', addedWords, removedWords }, ...prev].slice(0, 3));
+        if (location === 'TopicInput') prevTextsRef.current.TopicInput = currText || '';
+        if (location === 'TextEditor' && targetId != null) {
+          const storeKey = options?.storeKey ?? targetId;
+          prevTextsRef.current.TextEditor[storeKey] = currText || '';
+        }
+        if (location === 'DevelopedTextPanel' && options?.storeKey != null) {
+          prevTextsRef.current.DevelopedTextPanel[options.storeKey] = currText || '';
+        }
+        if (location === 'ManualTextarea') prevTextsRef.current.ManualTextarea = currText || '';
+      }
+      delete diffTimersRef.current[key];
+    }, delay);
+  }, [dmpDiffCounts, logTextDiff, tokenize, loggingEnabled]);
+
+  // BLOCK_MOVE logging helper
+  const logBlockMove = useCallback((info) => {
+    if (!loggingEnabled) return;
+    const entry = {
+      type: 'BLOCK_REORDER',
+      ts: Date.now(),
+      sessionId: sessionIdRef.current,
+      writingMode,
+      location: 'TextEditor',
+      ...info,
+    };
+    aoiLogsRef.current.push(entry);
+    setLatestReorders(prev => [entry, ...prev].slice(0, 3));
+  }, [writingMode, loggingEnabled]);
 
   const getRectFromEl = useCallback((el) => {
     if (!el) return null;
@@ -1812,9 +1968,11 @@ export default function App() {
   }, [getRectFromEl, writingMode]);
 
   const logAOIEntry = useCallback((reason = 'heartbeat') => {
+    if (!loggingEnabled) return;
     const entry = {
       ts: Date.now(),
       sessionId: sessionIdRef.current,
+      type: 'AOI',
       reason,
       writingMode,
       window: {
@@ -1827,10 +1985,11 @@ export default function App() {
       areas: buildAreas(),
     };
     aoiLogsRef.current.push(entry);
-  }, [buildAreas, writingMode]);
+  }, [buildAreas, writingMode, loggingEnabled]);
 
   // Scroll/resize listeners + heartbeat
   useEffect(() => {
+    if (!loggingEnabled) return;
     const onScroll = () => logAOIEntry('scroll');
     const onResize = () => logAOIEntry('resize');
 
@@ -1847,10 +2006,11 @@ export default function App() {
       window.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', onResize);
     };
-  }, [logAOIEntry]);
+  }, [logAOIEntry, loggingEnabled]);
 
   // Layout-change via ResizeObserver on relevant AOIs
   useEffect(() => {
+    if (!loggingEnabled) return;
     const observers = [];
 
     const observeEl = (el) => {
@@ -1879,6 +2039,7 @@ export default function App() {
       observers.forEach(o => o.disconnect());
     };
   }, [
+    loggingEnabled,
     writingMode,
     writingBlocks.length,
     droppedBlocks.length,
@@ -1889,7 +2050,7 @@ export default function App() {
   const handleDownloadAOILog = useCallback(() => {
     // Set filename using Brisbane, Australia time (UTC+10)
     const brisbaneTime = new Date().toLocaleString('sv-SE', { timeZone: 'Australia/Brisbane' }).replace(' ', 'T');
-    const filename = `aoi_log_${brisbaneTime.replace(/[:.]/g, '-')}.json`;
+    const filename = `log_${brisbaneTime.replace(/[:.]/g, '-')}.json`;
     const blob = new Blob([JSON.stringify(aoiLogsRef.current, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -1915,6 +2076,19 @@ export default function App() {
     autoConnect();
   }, []);
 
+  // React to logging toggle: download when turning off, reset debug toggles
+  useEffect(() => {
+    if (!loggingEnabled) {
+      // Hide debug panels when logging stops
+      setShowDiffDebug(false);
+      setShowReorderDebug(false);
+      // Auto-download the current JSON log
+      if (aoiLogsRef.current.length > 0) {
+        handleDownloadAOILog();
+      }
+    }
+  }, [loggingEnabled, handleDownloadAOILog]);
+
   // Add handler for AI-only mode
   const handleAIOnlyGenerate = useCallback(async (prompt) => {
     if (!openaiConnected) {
@@ -1926,6 +2100,14 @@ export default function App() {
     setError('');
     
     try {
+      // Build conversational messages using prior AI responses for continuity
+      const messages = buildMessagesForAIOnly(prompt, expandedTextArray);
+
+      const promptWithReference = `${prompt}
+      
+      For reference, this is the current text developed so far (if any):
+      ${expandedTextArray.join('\n\n')}`;
+
       const response = await fetch('/.netlify/functions/chat-completions', {
         method: 'POST',
         headers: {
@@ -1933,15 +2115,23 @@ export default function App() {
         },
         body: JSON.stringify({
           model: 'gpt-4o',
-          prompt: prompt,
+          // Keep backward compatibility with server expecting `prompt`
+          prompt: promptWithReference,
+          // Also send messages for continuity if server supports it
+          messages,
           maxTokens: 4000,
           temperature: 0.7
         }),
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+        try {
+          const errorData = await response.json();
+          throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+        } catch (_) {
+          const errorText = await response.text();
+          throw new Error(errorText || `HTTP error! status: ${response.status}`);
+        }
       }
 
       const data = await response.json();
@@ -1950,15 +2140,18 @@ export default function App() {
         throw new Error('Invalid response format from OpenAI API');
       }
 
-      const aiResponse = data.choices[0].message.content.trim();
-      setExpandedTextArray([aiResponse]);
+      const aiResponse = (data.choices?.[0]?.message?.content || '').trim();
+      const prev = prevTextsRef.current.DevelopedTextPanel['ai-only-0'] || '';
+      scheduleDebouncedDiff(`DP-0-ai`, prev, aiResponse, 'DevelopedTextPanel', 'ai', 1, 0, { storeKey: 'ai-only-0', blockId: null, indexId: 0 });
+      // Append to history for future continuity
+      setExpandedTextArray(prevArr => [...prevArr, aiResponse]);
     } catch (error) {
       console.error('Error generating AI response:', error);
       setError(`Failed to generate response: ${error.message}`);
     } finally {
       setIsGenerating(false);
     }
-  }, [openaiConnected]);
+  }, [openaiConnected, scheduleDebouncedDiff, buildMessagesForAIOnly, expandedTextArray]);
 
   // Helper functions to work with hierarchy
   const getParentBlocks = useCallback(() => {
@@ -2038,10 +2231,18 @@ export default function App() {
   }, []);
 
   const handleUpdateDroppedBlock = useCallback((index, updatedBlock) => {
+    try {
+      const id = updatedBlock?.id;
+      if (id != null) {
+        const prev = prevTextsRef.current.TextEditor[id] || '';
+        const curr = (updatedBlock.summary || '').toString();
+        scheduleDebouncedDiff(`TE-${id}-human`, prev, curr, 'TextEditor', 'human', id + 1, undefined, { storeKey: id, blockId: id, indexId: null });
+      }
+    } catch {}
     setDroppedBlocks(prev => prev.map((block, i) => 
       i === index ? updatedBlock : block
     ));
-  }, []);
+  }, [scheduleDebouncedDiff]);
 
   const handleDrop = useCallback((item, dropTarget = null) => {
     const newBlock = {
@@ -2051,6 +2252,13 @@ export default function App() {
       children: [],
       isDeveloped: false, // Add flag to check if this block has already been developed
     };
+
+    // Log AI diff for the dropped block's summary into TextEditor
+    try {
+      const curr = (newBlock.summary || '').toString();
+      const prev = prevTextsRef.current.TextEditor[newBlock.id] || '';
+      scheduleDebouncedDiff(`TE-${newBlock.id}-ai`, prev, curr, 'TextEditor', 'ai', newBlock.id + 1, 0, { storeKey: newBlock.id, blockId: newBlock.id, indexId: null });
+    } catch {}
 
     setDroppedBlocks(prev => {
       const updated = [...prev, newBlock];
@@ -2066,53 +2274,47 @@ export default function App() {
 
       return updated;
     });
-  }, []);
+  }, [scheduleDebouncedDiff]);
 
   const handleMove = useCallback((draggedItem, dropTarget) => {
     if (typeof draggedItem === 'number' && typeof dropTarget === 'number') {
-      // This is top-level block reordering (old signature)
+      // Top-level reorder
       setDroppedBlocks(prev => {
         const updated = [...prev];
-
-        // FIXED: Ensure we're only moving top-level blocks
         const draggedBlock = updated[draggedItem];
         const targetBlock = updated[dropTarget];
-
-        if (draggedBlock && targetBlock &&
-          !draggedBlock.parentId && !targetBlock.parentId) {
+        if (draggedBlock && targetBlock && !draggedBlock.parentId && !targetBlock.parentId) {
           const [removedBlock] = updated.splice(draggedItem, 1);
           updated.splice(dropTarget, 0, removedBlock);
+          logBlockMove({
+            moveType: 'reorder-top-level',
+            draggedBlockId: draggedBlock.id,
+            targetBlockId: targetBlock.id,
+            oldParentId: null,
+            newParentId: null
+          });
         }
-
-        // Clean up any undefined blocks
-        return updated.filter(block => block != null);
+        return updated.filter(b => b != null);
       });
     } else if (dropTarget?.type === 'child-zone') {
-      // This is dropping into child zone
+      // Move into child zone (become child)
       setDroppedBlocks(prev => {
         const updated = [...prev];
         const draggedBlock = updated.find(b => b && b.id === draggedItem.id);
-
         if (!draggedBlock) return prev;
-
-        // PREVENT: Don't allow parent blocks with children to become children
+        const oldParentId = draggedBlock.parentId || null;
+        // Prevent moving parent with children
         if (!draggedBlock.parentId && draggedBlock.children && draggedBlock.children.length > 0) {
           console.warn('Cannot move a parent block with children into a child zone');
-          return prev; // Don't allow the operation
+          return prev;
         }
-
-        // Remove from old parent if it had one
         if (draggedBlock.parentId) {
           const oldParent = updated.find(b => b && b.id === draggedBlock.parentId);
           if (oldParent && oldParent.children) {
             oldParent.children = oldParent.children.filter(id => id !== draggedBlock.id);
           }
         }
-
-        // Update block's parent
         draggedBlock.parentId = dropTarget.parentId;
-
-        // Add to new parent if applicable
         const newParent = updated.find(b => b && b.id === dropTarget.parentId);
         if (newParent) {
           if (!newParent.children) newParent.children = [];
@@ -2120,77 +2322,63 @@ export default function App() {
             newParent.children.push(draggedBlock.id);
           }
         }
-
-        // Clean up any undefined blocks
-        return updated.filter(block => block != null);
+        logBlockMove({
+          moveType: oldParentId === null ? 'demote-to-child' : 'child-reassign',
+          draggedBlockId: draggedBlock.id,
+          targetBlockId: dropTarget.parentId,
+          oldParentId,
+          newParentId: dropTarget.parentId
+        });
+        return updated.filter(b => b != null);
       });
     } else if (draggedItem.id && dropTarget.id && dropTarget.source === 'editor') {
-      // Handle all block movements including child reordering with position awareness
       setDroppedBlocks(prev => {
         const updated = [...prev];
         const draggedBlock = updated.find(b => b && b.id === draggedItem.id);
         const targetBlock = updated.find(b => b && b.id === dropTarget.id);
+        if (!draggedBlock || !targetBlock) return prev.filter(b => b != null);
+        const oldParentId = draggedBlock.parentId || null;
+        let moveType = 'unknown';
 
-        if (!draggedBlock || !targetBlock) {
-          console.warn('Could not find dragged or target block:', { draggedItem, dropTarget });
-          return prev.filter(block => block != null);
-        }
-
-        // Case 1: Both blocks have the same parent (child reordering)
         if (draggedBlock.parentId && draggedBlock.parentId === targetBlock.parentId) {
+          // Reorder children
           const parent = updated.find(b => b && b.id === draggedBlock.parentId);
-          if (parent && parent.children) {
-            const draggedIndex = parent.children.indexOf(draggedBlock.id);
-            const targetIndex = parent.children.indexOf(targetBlock.id);
-
-            if (draggedIndex !== -1 && targetIndex !== -1 && draggedIndex !== targetIndex) {
-              // Remove dragged block
-              parent.children.splice(draggedIndex, 1);
-              // Insert at target position
-              parent.children.splice(targetIndex, 0, draggedBlock.id);
+            if (parent && parent.children) {
+              const draggedIndex = parent.children.indexOf(draggedBlock.id);
+              const targetIndex = parent.children.indexOf(targetBlock.id);
+              if (draggedIndex !== -1 && targetIndex !== -1 && draggedIndex !== targetIndex) {
+                parent.children.splice(draggedIndex, 1);
+                parent.children.splice(targetIndex, 0, draggedBlock.id);
+                moveType = 'reorder-children';
+              }
             }
-          }
-        }
-        // Case 2: Moving child to top-level (child promotion)
-        else if (draggedBlock.parentId && !targetBlock.parentId) {
-          // Remove from old parent
+        } else if (draggedBlock.parentId && !targetBlock.parentId) {
+          // Promote child to top-level
           const oldParent = updated.find(b => b && b.id === draggedBlock.parentId);
           if (oldParent && oldParent.children) {
             oldParent.children = oldParent.children.filter(id => id !== draggedBlock.id);
           }
-
-          // Make it a top-level block
           draggedBlock.parentId = null;
-
-          // SIMPLIFIED: Just move it to right after the target block
           const targetIndex = updated.findIndex(b => b && b.id === targetBlock.id);
           if (targetIndex !== -1) {
-            // Remove from current position
             const draggedIndex = updated.findIndex(b => b && b.id === draggedBlock.id);
             if (draggedIndex !== -1) {
               updated.splice(draggedIndex, 1);
-              // Always insert after the target (feels more natural for promotion)
               const newTargetIndex = draggedIndex < targetIndex ? targetIndex : targetIndex + 1;
               updated.splice(newTargetIndex, 0, draggedBlock);
             }
           }
-        }
-        // Case 3: Moving top-level block to become a child
-        else if (!draggedBlock.parentId && targetBlock.parentId) {
-          // PREVENT: Don't allow parent blocks with children to become children
+          moveType = 'promote-child';
+        } else if (!draggedBlock.parentId && targetBlock.parentId) {
+          // Demote top-level to child
           if (draggedBlock.children && draggedBlock.children.length > 0) {
             console.warn('Cannot move a parent block with children to become a child');
-            return prev.filter(block => block != null);
+            return prev.filter(b => b != null);
           }
-
-          // Set the dragged block's parent to the same as target
           draggedBlock.parentId = targetBlock.parentId;
-
-          // Add to the parent's children array
           const newParent = updated.find(b => b && b.id === targetBlock.parentId);
           if (newParent) {
             if (!newParent.children) newParent.children = [];
-            // Insert before the target block
             const targetIndex = newParent.children.indexOf(targetBlock.id);
             if (targetIndex !== -1) {
               newParent.children.splice(targetIndex, 0, draggedBlock.id);
@@ -2198,17 +2386,13 @@ export default function App() {
               newParent.children.push(draggedBlock.id);
             }
           }
-        }
-        // Case 4: Moving child from one parent to another child (complex case)
-        else if (draggedBlock.parentId && targetBlock.parentId &&
-          draggedBlock.parentId !== targetBlock.parentId) {
-          // Remove from old parent
+          moveType = 'demote-to-child';
+        } else if (draggedBlock.parentId && targetBlock.parentId && draggedBlock.parentId !== targetBlock.parentId) {
+          // Move child between parents
           const oldParent = updated.find(b => b && b.id === draggedBlock.parentId);
           if (oldParent && oldParent.children) {
             oldParent.children = oldParent.children.filter(id => id !== draggedBlock.id);
           }
-
-          // Add to new parent
           draggedBlock.parentId = targetBlock.parentId;
           const newParent = updated.find(b => b && b.id === targetBlock.parentId);
           if (newParent) {
@@ -2220,13 +2404,21 @@ export default function App() {
               newParent.children.push(draggedBlock.id);
             }
           }
+          moveType = 'move-between-parents';
         }
 
-        // Clean up any undefined blocks at the end
-        return updated.filter(block => block != null);
+        logBlockMove({
+          moveType,
+          draggedBlockId: draggedBlock.id,
+          targetBlockId: targetBlock.id,
+          oldParentId,
+          newParentId: draggedBlock.parentId || null
+        });
+
+        return updated.filter(b => b != null);
       });
     }
-  }, []);
+  }, [logBlockMove]);
 
   const handleRemove = useCallback((index) => {
     setDroppedBlocks(prev => {
@@ -2261,6 +2453,11 @@ export default function App() {
     setDroppedBlocks(prev => [...prev, newBlock]);
     setCustomText('');
     setNextBlockId(prev => prev + 1);
+    // Log human diff for manual add (summary only)
+    try {
+      const prev = prevTextsRef.current.TextEditor[blockId] || '';
+      scheduleDebouncedDiff(`TE-${blockId}-human-add`, prev, text, 'TextEditor', 'human', blockId + 1, undefined, { storeKey: blockId, blockId, indexId: null });
+    } catch {}
     
     // Mark this block as having title generation in progress
     setGeneratingTitleForBlocks(prev => new Set([...prev, blockId]));
@@ -2302,7 +2499,7 @@ export default function App() {
         return newSet;
       });
     }
-  }, [customText, nextBlockId, openaiConnected]);
+  }, [customText, nextBlockId, openaiConnected, scheduleDebouncedDiff]);
 
   const handleDevelopText = useCallback(async () => {
     if (!openaiConnected) {
@@ -2314,8 +2511,34 @@ export default function App() {
     setError('');
     
     try {
-      const expanded = await expandTextWithOpenAI(droppedBlocks, currentTopic);
-      setExpandedTextArray(expanded);
+      const expanded = await expandTextWithOpenAI(
+        droppedBlocks,
+        currentTopic,
+        expandedTextArray
+      );
+      const parentBlocks = droppedBlocks.filter(block =>
+        block && (block.parentId === null || block.parentId === undefined)
+      );
+      // Log AI diffs per paragraph (include blockId and indexId)
+      (expanded || []).forEach((p, i) => {
+        const parentId = parentBlocks[i]?.id ?? null;
+        const prev = parentId != null ? (prevTextsRef.current.DevelopedTextPanel[parentId] || '') : '';
+        const curr = (p || '').toString();
+        scheduleDebouncedDiff(`DP-${parentId ?? i}-ai`, prev, curr, 'DevelopedTextPanel', 'ai', i + 1, 0, { storeKey: parentId, blockId: parentId, indexId: i });
+      });
+      // In AI-only mode, rewrite the first block only
+      if (writingMode === 'ai-only') {
+        const next = [...expandedTextArray];
+        const newParagraph = expanded?.[0] || '';
+        if (next.length === 0) {
+          setExpandedTextArray([newParagraph]);
+        } else {
+          next[0] = newParagraph;
+          setExpandedTextArray(next);
+        }
+      } else {
+        setExpandedTextArray(expanded);
+      }
 
       // Mark all parent blocks as developed
       setDroppedBlocks(prev => prev.map(block => {
@@ -2330,7 +2553,7 @@ export default function App() {
     } finally {
       setIsGenerating(false);
     }
-  }, [droppedBlocks, openaiConnected, currentTopic]);
+  }, [droppedBlocks, openaiConnected, currentTopic, scheduleDebouncedDiff]);
 
   const handleRegenerateBlock = useCallback(async (blockIndex) => {
     if (!openaiConnected) {
@@ -2389,10 +2612,22 @@ export default function App() {
         // Regenerate as cohesive paragraph
         const allContent = [parentBlockForRegeneration.summary, ...childBlocksForRegeneration.map(child => child.summary)];
 
+        // Include only the current developed text for this parent block (if any), not the full text
+        const parentBlocksForIndex = droppedBlocks.filter(block =>
+          block && (block.parentId === null || block.parentId === undefined)
+        );
+        const expandedTextIndexRef = parentBlocksForIndex.findIndex(block => block.id === parentBlockForRegeneration.id);
+        const currentExpandedTextForParent = expandedTextIndexRef !== -1 ? (expandedTextArray[expandedTextIndexRef] || '') : '';
+        const referenceSection = currentExpandedTextForParent && currentExpandedTextForParent.trim()
+          ? `\n\nFor reference, this is the current developed text for this block (if any):\n${currentExpandedTextForParent.trim()}`
+          : '';
+
         const prompt = `You are a clear and concise writer. Your goal is to write text that sounds natural to read out loud, using simple and direct language while staying polished and credible. Your task is to expand the following outline into a cohesive paragraph.
 
 Topic sentence: ${parentBlockForRegeneration.summary}
 Supporting points: ${childBlocksForRegeneration.map(child => `- ${child.summary}`).join('\n')}
+
+      ${referenceSection}
 
 Instructions:
 - Create a ${allContent.length * 1.5} sentence paragraph
@@ -2430,7 +2665,13 @@ Respond with only the expanded paragraph, no additional commentary or formatting
         newExpansion = data.choices[0].message.content.trim();
       } else {
         // This is a simple parent block without children - use single block regeneration
-        newExpansion = await regenerateSingleBlockExpansion(blockToRegenerate, currentTopic);
+        // Pass the current expanded paragraph for this block (if any) as reference
+        const parentBlocksForIndex = droppedBlocks.filter(block =>
+          block && (block.parentId === null || block.parentId === undefined)
+        );
+        const expandedTextIndexRef = parentBlocksForIndex.findIndex(block => block.id === blockToRegenerate.id);
+        const currentExpandedText = expandedTextIndexRef !== -1 ? (expandedTextArray[expandedTextIndexRef] || '') : '';
+        newExpansion = await regenerateSingleBlockExpansion(blockToRegenerate, currentTopic, currentExpandedText);
       }
 
       // Find the correct position in expandedTextArray
@@ -2443,8 +2684,14 @@ Respond with only the expanded paragraph, no additional commentary or formatting
       const expandedTextIndex = parentBlocks.findIndex(block => block.id === targetParentBlock.id);
 
       if (expandedTextIndex !== -1) {
-        // CHANGED: Check if this block has been developed before
+        // For already-developed blocks, treat as a true replacement at the same index
         if (targetParentBlock.isDeveloped) {
+          try {
+            const prev = prevTextsRef.current.DevelopedTextPanel[targetParentBlock.id] || '';
+            const curr = (newExpansion || '').toString();
+            // Use DMP-based diff; no replace mode
+            scheduleDebouncedDiff(`DP-${targetParentBlock.id}-ai-regen`, prev, curr, 'DevelopedTextPanel', 'ai', expandedTextIndex + 1, 0, { storeKey: targetParentBlock.id, blockId: targetParentBlock.id, indexId: expandedTextIndex });
+          } catch {}
           // Block was already developed - UPDATE at the position
           setExpandedTextArray(prev => {
             const newArray = [...prev];
@@ -2457,11 +2704,22 @@ Respond with only the expanded paragraph, no additional commentary or formatting
           });
         } else {
           // Block is NEW and hasn't been developed yet - INSERT at position
+          // Log as a pure addition (no removals due to index shift)
+          try {
+            const prev = '';
+            const curr = (newExpansion || '').toString();
+            scheduleDebouncedDiff(`DP-${targetParentBlock.id}-ai-insert`, prev, curr, 'DevelopedTextPanel', 'ai', expandedTextIndex + 1, 0, { storeKey: targetParentBlock.id, blockId: targetParentBlock.id, indexId: expandedTextIndex });
+          } catch {}
+
           setExpandedTextArray(prev => {
             const newArray = [...prev];
             newArray.splice(expandedTextIndex, 0, newExpansion);
             return newArray;
           });
+
+          // Align prevTexts indices to account for the insertion, so future diffs match positions
+          // Store baseline under blockId; no index shifting needed anymore
+          prevTextsRef.current.DevelopedTextPanel[targetParentBlock.id] = (newExpansion || '').toString();
 
           // Mark the block as developed
           setDroppedBlocks(prev => prev.map(block =>
@@ -2483,7 +2741,7 @@ Respond with only the expanded paragraph, no additional commentary or formatting
         return newSet;
       });
     }
-  }, [droppedBlocks, openaiConnected, currentTopic]);
+  }, [droppedBlocks, openaiConnected, currentTopic, scheduleDebouncedDiff]);
 
   const handleCopyToClipboard = useCallback(async () => {
     try {
@@ -2549,15 +2807,91 @@ Respond with only the expanded paragraph, no additional commentary or formatting
                 <Settings size={20} />
               </button>
 
+              {/* Logging Toggle */}
               <button
-                onClick={handleDownloadAOILog}
-                className="px-3 py-1.5 rounded text-[12px] font-['Chivo:Bold',_sans-serif] bg-gray-100 hover:bg-gray-200 text-gray-700"
-                title="Download AOI log JSON"
+                onClick={() => setLoggingEnabled(prev => !prev)}
+                className={`px-3 py-1.5 rounded text-[12px] font-['Chivo:Bold',_sans-serif] ${loggingEnabled ? 'bg-blue-100 text-blue-700 hover:bg-blue-200' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                title={loggingEnabled ? 'Stop logging' : 'Start logging'}
               >
-                Download AOI Log
+                {loggingEnabled ? 'Stop Logging' : 'Start Logging'}
               </button>
+
+              {loggingEnabled && (
+                <>
+                  <button
+                    onClick={() => setShowDiffDebug(v => !v)}
+                    className="px-3 py-1.5 rounded text-[12px] font-['Chivo:Bold',_sans-serif] bg-gray-100 hover:bg-gray-200 text-gray-700"
+                    title="Toggle diff debug panel"
+                  >
+                    {showDiffDebug ? 'Hide Diff Debug' : 'Show Diff Debug'}
+                  </button>
+                  <button
+                    onClick={() => setShowReorderDebug(v => !v)}
+                    className="px-3 py-1.5 rounded text-[12px] font-['Chivo:Bold',_sans-serif] bg-gray-100 hover:bg-gray-200 text-gray-700"
+                    title="Toggle reorder debug panel"
+                  >
+                    {showReorderDebug ? 'Hide Reorder Debug' : 'Show Reorder Debug'}
+                  </button>
+                </>
+              )}
             </div>
           </div>
+
+          {showDiffDebug && latestDiffs.length > 0 && (
+            <div className="mb-6 border border-blue-200 bg-blue-50 text-blue-800 rounded p-4 text-sm">
+              <div className="font-bold mb-2">Recent TEXT_DIFFs (last 3)</div>
+              <div className="space-y-4">
+                {latestDiffs.map((d, idx) => (
+                  <div key={idx} className="grid grid-cols-1 md:grid-cols-2 gap-3 border border-blue-100 rounded p-3 bg-white">
+                    <div>
+                      <div className="text-xs text-gray-600">Location / By / Target</div>
+                      <div>{d.location} / {d.by} / {d.targetId}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-600">IDs</div>
+                      <div>Block ID: {d.blockId ?? '—'} · Index: {d.indexId ?? '—'}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-600">Counts</div>
+                      <div>Added: {d.addedWords} · Removed: {d.removedWords}</div>
+                    </div>
+                    <div className="md:col-span-1">
+                      <div className="text-xs text-gray-600">Prev</div>
+                      <pre className="whitespace-pre-wrap break-words bg-gray-50 border border-blue-100 rounded p-2 text-gray-900">{d.prevText}</pre>
+                    </div>
+                    <div className="md:col-span-1">
+                      <div className="text-xs text-gray-600">Curr</div>
+                      <pre className="whitespace-pre-wrap break-words bg-gray-50 border border-blue-100 rounded p-2 text-gray-900">{d.currText}</pre>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {showReorderDebug && latestReorders.length > 0 && (
+            <div className="mb-6 border border-purple-200 bg-purple-50 text-purple-800 rounded p-4 text-sm">
+              <div className="font-bold mb-2">Recent BLOCK_REORDERs (last 3)</div>
+              <div className="space-y-3">
+                {latestReorders.map((r, idx) => (
+                  <div key={idx} className="grid grid-cols-1 md:grid-cols-3 gap-3 border border-purple-100 rounded p-3 bg-white">
+                    <div>
+                      <div className="text-xs text-gray-600">Move Type</div>
+                      <div>{r.moveType}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-600">Dragged / Target</div>
+                      <div>{r.draggedBlockId} → {r.targetBlockId}</div>
+                    </div>
+                    <div>
+                      <div className="text-xs text-gray-600">Parent Change</div>
+                      <div>{String(r.oldParentId)} → {String(r.newParentId)}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-6 text-sm">
@@ -2575,6 +2909,10 @@ Respond with only the expanded paragraph, no additional commentary or formatting
                   isGenerating={isGeneratingBlocks}
                   openaiConnected={openaiConnected}
                   mode="block"
+                  onTopicChange={(text) => {
+                    const prev = prevTextsRef.current.TopicInput || '';
+                    scheduleDebouncedDiff('TopicInput', prev, (text || '').toString(), 'TopicInput', 'human', 'topic');
+                  }}
                 />
 
                 <div className="w-full" ref={writingBlocksRef}>
@@ -2682,7 +3020,20 @@ Respond with only the expanded paragraph, no additional commentary or formatting
                   <DevelopedTextPanel
                     ref={developedPanelRef}
                     expandedTextArray={expandedTextArray}
-                    onTextChange={setExpandedTextArray}
+                    onTextChange={(newArray) => {
+                      (newArray || []).forEach((val, i) => {
+                        const parentBlocks = droppedBlocks.filter(block =>
+                          block && (block.parentId === null || block.parentId === undefined)
+                        );
+                        const parentId = parentBlocks[i]?.id ?? null;
+                        const prev = parentId != null ? (prevTextsRef.current.DevelopedTextPanel[parentId] || '') : '';
+                        const curr = (val || '').toString();
+                        if (prev !== curr) {
+                          scheduleDebouncedDiff(`DP-${parentId ?? i}-human`, prev, curr, 'DevelopedTextPanel', 'human', i + 1, undefined, { storeKey: parentId, blockId: parentId, indexId: i });
+                        }
+                      });
+                      setExpandedTextArray(newArray);
+                    }}
                     isGenerating={isGenerating}
                   />
                 </div>
@@ -2723,7 +3074,13 @@ Respond with only the expanded paragraph, no additional commentary or formatting
               <textarea
                 ref={manualTextareaRef}
                 value={manualText}
-                onChange={(e) => setManualText(e.target.value)}
+                onChange={(e) => {
+                  const curr = (e.target.value || '').toString();
+                  const prev = prevTextsRef.current.ManualTextarea || '';
+                  // Log human diff in manual mode
+                  scheduleDebouncedDiff('ManualTextarea', prev, curr, 'ManualTextarea', 'human', 'manual');
+                  setManualText(curr);
+                }}
                 className="w-full min-h-[600px] p-6 border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 text-[14px] leading-6"
                 placeholder="Start writing your text here..."
               />
@@ -2740,6 +3097,10 @@ Respond with only the expanded paragraph, no additional commentary or formatting
                   isGenerating={isGenerating}
                   openaiConnected={openaiConnected}
                   mode="ai-only"
+                  onTopicChange={(text) => {
+                    const prev = prevTextsRef.current.TopicInput || '';
+                    scheduleDebouncedDiff('TopicInput', prev, (text || '').toString(), 'TopicInput', 'human', 'topic');
+                  }}
                 />
               </div>
               <div className="max-w-4xl mx-auto">
@@ -2763,7 +3124,18 @@ Respond with only the expanded paragraph, no additional commentary or formatting
                 <DevelopedTextPanel
                   ref={developedPanelRef}
                   expandedTextArray={expandedTextArray}
-                  onTextChange={setExpandedTextArray}
+                  onTextChange={(newArray) => {
+                    (newArray || []).forEach((val, i) => {
+                      // In AI-only mode, there is no parentId; use a stable storeKey
+                      const storeKey = 'ai-only-0';
+                      const prev = prevTextsRef.current.DevelopedTextPanel[storeKey] || '';
+                      const curr = (val || '').toString();
+                      if (prev !== curr) {
+                        scheduleDebouncedDiff(`DP-ai-only-${i}-human`, prev, curr, 'DevelopedTextPanel', 'human', i + 1, undefined, { storeKey, blockId: null, indexId: i });
+                      }
+                    });
+                    setExpandedTextArray(newArray);
+                  }}
                   isGenerating={isGenerating}
                 />
               </div>
