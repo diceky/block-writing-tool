@@ -1873,9 +1873,9 @@ export default function App() {
     return { addedWords: added, removedWords: removed };
   }, [tokenize]);
 
-  const logTextDiff = useCallback(({ location, by, addedWords, removedWords, targetId, blockId = null, indexId = null }) => {
+  const logTextDiff = useCallback(({ location, by, addedWords, removedWords, targetId, blockId = null, indexId = null, editType = null }) => {
     if (!loggingEnabled) return;
-    aoiLogsRef.current.push({
+    const entry = {
       type: 'TEXT_DIFF',
       ts: Date.now(),
       sessionId: sessionIdRef.current,
@@ -1887,14 +1887,18 @@ export default function App() {
       targetId,
       blockId,
       indexId,
-    });
+    };
+    if (editType) {
+      entry.editType = editType;
+    }
+    aoiLogsRef.current.push(entry);
   }, [writingMode, loggingEnabled]);
 
   const scheduleDebouncedDiff = useCallback((key, prevText, currText, location, by, targetId, delay = 800, options = {}) => {
     if (by === 'ai') {
       const { addedWords, removedWords } = dmpDiffCounts(prevText, currText);
       if (loggingEnabled && (addedWords || removedWords)) {
-        logTextDiff({ location, by, addedWords, removedWords, targetId, blockId: options?.blockId ?? null, indexId: options?.indexId ?? null });
+        logTextDiff({ location, by, addedWords, removedWords, targetId, blockId: options?.blockId ?? null, indexId: options?.indexId ?? null, editType: options?.editType ?? null });
         setLatestDiffs(prev => [{ location, by, targetId, blockId: options?.blockId ?? null, indexId: options?.indexId ?? null, prevText: prevText || '', currText: currText || '', addedWords, removedWords }, ...prev].slice(0, 3));
       }
       if (location === 'TopicInput') prevTextsRef.current.TopicInput = currText || '';
@@ -1913,7 +1917,7 @@ export default function App() {
     diffTimersRef.current[key] = window.setTimeout(() => {
       const { addedWords, removedWords } = dmpDiffCounts(prevText, currText);
       if (loggingEnabled && (addedWords || removedWords)) {
-        logTextDiff({ location, by, addedWords, removedWords, targetId, blockId: options?.blockId ?? null, indexId: options?.indexId ?? null });
+        logTextDiff({ location, by, addedWords, removedWords, targetId, blockId: options?.blockId ?? null, indexId: options?.indexId ?? null, editType: options?.editType ?? null });
         setLatestDiffs(prev => [{ location, by, targetId, blockId: options?.blockId ?? null, indexId: options?.indexId ?? null, prevText: prevText || '', currText: currText || '', addedWords, removedWords }, ...prev].slice(0, 3));
         if (location === 'TopicInput') prevTextsRef.current.TopicInput = currText || '';
         if (location === 'TextEditor' && targetId != null) {
@@ -2148,7 +2152,7 @@ export default function App() {
 
       const aiResponse = (data.choices?.[0]?.message?.content || '').trim();
       const prev = prevTextsRef.current.DevelopedTextPanel['ai-only-0'] || '';
-      scheduleDebouncedDiff(`DP-0-ai`, prev, aiResponse, 'DevelopedTextPanel', 'ai', 1, 0, { storeKey: 'ai-only-0', blockId: null, indexId: 0 });
+      scheduleDebouncedDiff(`DP-0-ai`, prev, aiResponse, 'DevelopedTextPanel', 'ai', 1, 0, { storeKey: 'ai-only-0', blockId: null, indexId: 0, editType: 'generate-text' });
       // Append to history for future continuity
       setExpandedTextArray(prevArr => [...prevArr, aiResponse]);
     } catch (error) {
@@ -2242,7 +2246,7 @@ export default function App() {
       if (id != null) {
         const prev = prevTextsRef.current.TextEditor[id] || '';
         const curr = (updatedBlock.summary || '').toString();
-        scheduleDebouncedDiff(`TE-${id}-human`, prev, curr, 'TextEditor', 'human', id + 1, undefined, { storeKey: id, blockId: id, indexId: null });
+        scheduleDebouncedDiff(`TE-${id}-human`, prev, curr, 'TextEditor', 'human', id + 1, undefined, { storeKey: id, blockId: id, indexId: null, editType: 'edit-existing' });
       }
     } catch {}
     setDroppedBlocks(prev => prev.map((block, i) => 
@@ -2263,7 +2267,7 @@ export default function App() {
     try {
       const curr = (newBlock.summary || '').toString();
       const prev = prevTextsRef.current.TextEditor[newBlock.id] || '';
-      scheduleDebouncedDiff(`TE-${newBlock.id}-ai`, prev, curr, 'TextEditor', 'ai', newBlock.id + 1, 0, { storeKey: newBlock.id, blockId: newBlock.id, indexId: null });
+      scheduleDebouncedDiff(`TE-${newBlock.id}-ai`, prev, curr, 'TextEditor', 'ai', newBlock.id + 1, 0, { storeKey: newBlock.id, blockId: newBlock.id, indexId: null, editType: 'new-dropped' });
     } catch {}
 
     setDroppedBlocks(prev => {
@@ -2462,7 +2466,7 @@ export default function App() {
     // Log human diff for manual add (summary only)
     try {
       const prev = prevTextsRef.current.TextEditor[blockId] || '';
-      scheduleDebouncedDiff(`TE-${blockId}-human-add`, prev, text, 'TextEditor', 'human', blockId + 1, undefined, { storeKey: blockId, blockId, indexId: null });
+      scheduleDebouncedDiff(`TE-${blockId}-human-add`, prev, text, 'TextEditor', 'human', blockId + 1, undefined, { storeKey: blockId, blockId, indexId: null, editType: 'new-custom' });
     } catch {}
     
     // Mark this block as having title generation in progress
@@ -2552,7 +2556,7 @@ export default function App() {
         const parentId = parentBlocks[i]?.id ?? null;
         const prev = parentId != null ? (prevTextsRef.current.DevelopedTextPanel[parentId] || '') : '';
         const curr = (p || '').toString();
-        scheduleDebouncedDiff(`DP-${parentId ?? i}-ai`, prev, curr, 'DevelopedTextPanel', 'ai', i + 1, 0, { storeKey: parentId, blockId: parentId, indexId: i });
+        scheduleDebouncedDiff(`DP-${parentId ?? i}-ai`, prev, curr, 'DevelopedTextPanel', 'ai', i + 1, 0, { storeKey: parentId, blockId: parentId, indexId: i, editType: 'develop-full-text' });
       });
       // In AI-only mode, rewrite the first block only
       if (writingMode === 'ai-only') {
@@ -2718,7 +2722,7 @@ Respond with only the expanded paragraph, no additional commentary or formatting
             const prev = prevTextsRef.current.DevelopedTextPanel[targetParentBlock.id] || '';
             const curr = (newExpansion || '').toString();
             // Use DMP-based diff; no replace mode
-            scheduleDebouncedDiff(`DP-${targetParentBlock.id}-ai-regen`, prev, curr, 'DevelopedTextPanel', 'ai', expandedTextIndex + 1, 0, { storeKey: targetParentBlock.id, blockId: targetParentBlock.id, indexId: expandedTextIndex });
+            scheduleDebouncedDiff(`DP-${targetParentBlock.id}-ai-regen`, prev, curr, 'DevelopedTextPanel', 'ai', expandedTextIndex + 1, 0, { storeKey: targetParentBlock.id, blockId: targetParentBlock.id, indexId: expandedTextIndex, editType: 'regenerate-existing' });
           } catch {}
           // Block was already developed - UPDATE at the position
           setExpandedTextArray(prev => {
@@ -2736,7 +2740,7 @@ Respond with only the expanded paragraph, no additional commentary or formatting
           try {
             const prev = '';
             const curr = (newExpansion || '').toString();
-            scheduleDebouncedDiff(`DP-${targetParentBlock.id}-ai-insert`, prev, curr, 'DevelopedTextPanel', 'ai', expandedTextIndex + 1, 0, { storeKey: targetParentBlock.id, blockId: targetParentBlock.id, indexId: expandedTextIndex });
+            scheduleDebouncedDiff(`DP-${targetParentBlock.id}-ai-insert`, prev, curr, 'DevelopedTextPanel', 'ai', expandedTextIndex + 1, 0, { storeKey: targetParentBlock.id, blockId: targetParentBlock.id, indexId: expandedTextIndex, editType: 'regenerate-new' });
           } catch {}
 
           setExpandedTextArray(prev => {
@@ -3057,7 +3061,7 @@ Respond with only the expanded paragraph, no additional commentary or formatting
                         const prev = parentId != null ? (prevTextsRef.current.DevelopedTextPanel[parentId] || '') : '';
                         const curr = (val || '').toString();
                         if (prev !== curr) {
-                          scheduleDebouncedDiff(`DP-${parentId ?? i}-human`, prev, curr, 'DevelopedTextPanel', 'human', i + 1, undefined, { storeKey: parentId, blockId: parentId, indexId: i });
+                          scheduleDebouncedDiff(`DP-${parentId ?? i}-human`, prev, curr, 'DevelopedTextPanel', 'human', i + 1, undefined, { storeKey: parentId, blockId: parentId, indexId: i, editType: 'edit-existing' });
                         }
                       });
                       setExpandedTextArray(newArray);
@@ -3159,7 +3163,7 @@ Respond with only the expanded paragraph, no additional commentary or formatting
                       const prev = prevTextsRef.current.DevelopedTextPanel[storeKey] || '';
                       const curr = (val || '').toString();
                       if (prev !== curr) {
-                        scheduleDebouncedDiff(`DP-ai-only-${i}-human`, prev, curr, 'DevelopedTextPanel', 'human', i + 1, undefined, { storeKey, blockId: null, indexId: i });
+                        scheduleDebouncedDiff(`DP-ai-only-${i}-human`, prev, curr, 'DevelopedTextPanel', 'human', i + 1, undefined, { storeKey, blockId: null, indexId: i, editType: 'edit-existing' });
                       }
                     });
                     setExpandedTextArray(newArray);
