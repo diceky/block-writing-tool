@@ -12,6 +12,7 @@ dist
 dist-ssr
 *.local
 .env
+.venv
 build
 
 # Editor directories and files
