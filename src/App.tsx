@@ -1770,6 +1770,7 @@ export default function App() {
   const [droppedBlocks, setDroppedBlocks] = useState([]);
   const [customText, setCustomText] = useState('');
   const [expandedTextArray, setExpandedTextArray] = useState([]);
+  const [aiOnlyHistory, setAiOnlyHistory] = useState([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [regeneratingBlocks, setRegeneratingBlocks] = useState(new Set());
   const [nextBlockId, setNextBlockId] = useState(1000);
@@ -1832,9 +1833,13 @@ export default function App() {
   }, [expandedTextArray, writingMode]);
 
   // Conversational continuity settings for AI-only mode
-  const MAX_HISTORY_TOKENS = 3000; // approx cap for prior assistant outputs
+  const MAX_HISTORY_TOKENS = 3000; // approx cap for prior history
 
-  const buildMessagesForAIOnly = useCallback((prompt: string, historyText: string[]) => {
+  const buildMessagesForAIOnly = useCallback((
+    prompt: string,
+    history: Array<{ role: 'user' | 'assistant'; content: string }>,
+    expandedText: string
+  ) => {
     const system = {
       role: 'system',
       content: 'You are a clear, concise writing assistant. Continue the conversation naturally in plain, everyday English.'
@@ -1842,19 +1847,39 @@ export default function App() {
 
     const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [system];
 
-    // Add recent assistant outputs (most recent last), truncated by rough token estimate
+    // Add up to the last 10 user prompts and 10 assistant outputs, keeping order
+    const cappedHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [];
     let tokenEstimate = 0;
-    const startIdx = Math.max(0, historyText.length - 10);
-    for (let i = startIdx; i < historyText.length; i++) {
-      const content = (historyText[i] || '').toString();
+    let userCount = 0;
+    let assistantCount = 0;
+
+    for (let i = history.length - 1; i >= 0; i--) {
+      const entry = history[i];
+      if (!entry || !entry.content) continue;
+
+      if (entry.role === 'user' && userCount >= 10) continue;
+      if (entry.role === 'assistant' && assistantCount >= 10) continue;
+
+      const content = entry.content.toString();
       const words = content.trim().split(/\s+/).filter(Boolean).length;
       const approxTokens = Math.round(words * 1.3);
-      if (tokenEstimate + approxTokens > MAX_HISTORY_TOKENS) break;
-      messages.push({ role: 'assistant', content });
+      if (tokenEstimate + approxTokens > MAX_HISTORY_TOKENS) continue;
+
+      cappedHistory.push({ role: entry.role, content });
       tokenEstimate += approxTokens;
+      if (entry.role === 'user') userCount += 1;
+      if (entry.role === 'assistant') assistantCount += 1;
+
+      if (userCount >= 10 && assistantCount >= 10) break;
     }
 
-    messages.push({ role: 'user', content: prompt });
+    cappedHistory.reverse();
+    messages.push(...cappedHistory);
+    const promptWithReference = `${prompt}
+
+  For reference, this is the current text developed so far (if any):
+  ${expandedText}`;
+    messages.push({ role: 'user', content: promptWithReference });
     return messages;
   }, []);
 
@@ -2111,12 +2136,11 @@ export default function App() {
     
     try {
       // Build conversational messages using prior AI responses for continuity
-      const messages = buildMessagesForAIOnly(prompt, expandedTextArray);
-
-      const promptWithReference = `${prompt}
-      
-      For reference, this is the current text developed so far (if any):
-      ${expandedTextArray.join('\n\n')}`;
+      const messages = buildMessagesForAIOnly(
+        prompt,
+        aiOnlyHistory,
+        expandedTextArray.join('\n\n')
+      );
 
       const response = await fetch('/.netlify/functions/chat-completions', {
         method: 'POST',
@@ -2125,9 +2149,7 @@ export default function App() {
         },
         body: JSON.stringify({
           model: 'gpt-4o',
-          // Keep backward compatibility with server expecting `prompt`
-          prompt: promptWithReference,
-          // Also send messages for continuity if server supports it
+          // For AI-only mode, we send the conversation history array to preserve past versions of the essay
           messages,
           maxTokens: 4000,
           temperature: 0.7
@@ -2155,13 +2177,18 @@ export default function App() {
       scheduleDebouncedDiff(`DP-0-ai`, prev, aiResponse, 'DevelopedTextPanel', 'ai', 1, 0, { storeKey: 'ai-only-0', blockId: null, indexId: 0, editType: 'generate-text' });
       // Append to history for future continuity
       setExpandedTextArray(prevArr => [...prevArr, aiResponse]);
+      setAiOnlyHistory(prevArr => [
+        ...prevArr,
+        { role: 'user', content: prompt },
+        { role: 'assistant', content: aiResponse }
+      ]);
     } catch (error) {
       console.error('Error generating AI response:', error);
       setError(`Failed to generate response: ${error.message}`);
     } finally {
       setIsGenerating(false);
     }
-  }, [openaiConnected, scheduleDebouncedDiff, buildMessagesForAIOnly, expandedTextArray]);
+  }, [openaiConnected, scheduleDebouncedDiff, buildMessagesForAIOnly, aiOnlyHistory, expandedTextArray]);
 
   // Helper functions to work with hierarchy
   const getParentBlocks = useCallback(() => {

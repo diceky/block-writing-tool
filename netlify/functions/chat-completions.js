@@ -13,7 +13,8 @@ exports.handler = async (event) => {
             prompt,
             model,
             maxTokens,
-            temperature
+            temperature,
+            messages
         } = JSON.parse(event.body);
 
         const apiKey = process.env.OPENAI_API_KEY;
@@ -21,22 +22,25 @@ exports.handler = async (event) => {
             return { statusCode: 500, body: JSON.stringify({ error: "OPENAI_API_KEY not set" }) };
         }
 
-        if (!prompt) {
+        const hasMessages = Array.isArray(messages) && messages.length > 0;
+        if (!hasMessages && !prompt) {
             return {
                 statusCode: 400,
-                body: JSON.stringify({ error: 'Prompt is required' })
+                body: JSON.stringify({ error: 'Prompt or messages is required' })
             };
         }
 
         // Make the OpenAI API call
         const requestBody = {
             model: model || 'gpt-4o',
-            messages: [
-                {
-                    role: 'user',
-                    content: prompt
-                }
-            ],
+            messages: hasMessages
+                ? messages
+                : [
+                    {
+                        role: 'user',
+                        content: prompt
+                    }
+                ],
             temperature: temperature,
             max_tokens: maxTokens,
         };
