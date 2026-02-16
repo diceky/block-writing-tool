@@ -2085,17 +2085,31 @@ export default function App() {
   const handleDownloadAOILog = useCallback(() => {
     // Set filename using Brisbane, Australia time (UTC+10)
     const brisbaneTime = new Date().toLocaleString('sv-SE', { timeZone: 'Australia/Brisbane' }).replace(' ', 'T');
-    const filename = `log_${brisbaneTime.replace(/[:.]/g, '-')}.json`;
-    const blob = new Blob([JSON.stringify(aoiLogsRef.current, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  }, []);
+    const fileBase = `log_${brisbaneTime.replace(/[:.]/g, '-')}`;``
+    const essay = writingMode === 'manual'
+      ? (manualText || '').toString().trim()
+      : (expandedTextArray || []).join('\n\n').trim();
+
+    const jsonBlob = new Blob([JSON.stringify(aoiLogsRef.current, null, 2)], { type: 'application/json' });
+    const jsonUrl = URL.createObjectURL(jsonBlob);
+    const jsonLink = document.createElement('a');
+    jsonLink.href = jsonUrl;
+    jsonLink.download = `${fileBase}.json`;
+    document.body.appendChild(jsonLink);
+    jsonLink.click();
+    jsonLink.remove();
+    URL.revokeObjectURL(jsonUrl);
+
+    const essayBlob = new Blob([essay], { type: 'text/plain' });
+    const essayUrl = URL.createObjectURL(essayBlob);
+    const essayLink = document.createElement('a');
+    essayLink.href = essayUrl;
+    essayLink.download = `${fileBase}.txt`;
+    document.body.appendChild(essayLink);
+    essayLink.click();
+    essayLink.remove();
+    URL.revokeObjectURL(essayUrl);
+  }, [expandedTextArray, manualText, writingMode]);
 
   // Auto-connect when app loads
   useEffect(() => {
