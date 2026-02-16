@@ -28,3 +28,5 @@ build
 
 # Local Netlify folder
 .netlify
+
+data-analysis/data
