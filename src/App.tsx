@@ -1791,6 +1791,8 @@ export default function App() {
   // Reorder debug toggle and latest reorders (rolling 3)
   const [showReorderDebug, setShowReorderDebug] = useState(false);
   const [latestReorders, setLatestReorders] = useState([]);
+  // Stop-logging confirmation dialog
+  const [showStopLoggingConfirm, setShowStopLoggingConfirm] = useState(false);
 
   // AOI refs
   const topicInputRef = useRef(null);
@@ -2021,6 +2023,17 @@ export default function App() {
     };
     aoiLogsRef.current.push(entry);
   }, [buildAreas, writingMode, loggingEnabled]);
+
+  // Prevent accidental page reload/close while logging is active
+  useEffect(() => {
+    if (!loggingEnabled) return;
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [loggingEnabled]);
 
   // Scroll/resize listeners + heartbeat
   useEffect(() => {
@@ -2830,6 +2843,7 @@ Respond with only the expanded paragraph, no additional commentary or formatting
   }, [expandedTextArray]);
 
   return (
+    <>
     <DndProvider backend={HTML5Backend}>
       <div className="bg-[#ffffff] relative rounded-[20px] size-full">
         <div className="overflow-auto relative size-full p-20">
@@ -2882,7 +2896,13 @@ Respond with only the expanded paragraph, no additional commentary or formatting
 
               {/* Logging Toggle */}
               <button
-                onClick={() => setLoggingEnabled(prev => !prev)}
+                onClick={() => {
+                  if (loggingEnabled) {
+                    setShowStopLoggingConfirm(true);
+                  } else {
+                    setLoggingEnabled(true);
+                  }
+                }}
                 className={`px-3 py-1.5 rounded text-[12px] font-['Chivo:Bold',_sans-serif] ${loggingEnabled ? 'bg-blue-100 text-blue-700 hover:bg-blue-200' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
                 title={loggingEnabled ? 'Stop logging' : 'Start logging'}
               >
@@ -3217,5 +3237,34 @@ Respond with only the expanded paragraph, no additional commentary or formatting
         </div>
       </div>
     </DndProvider>
+
+      {/* Stop Logging Confirmation Dialog */}
+      {showStopLoggingConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-lg shadow-lg p-6 max-w-sm w-full mx-4">
+            <p className="text-[14px] font-['Chivo:Bold',_sans-serif] text-gray-800 mb-4">
+              Are you sure you want to stop logging?
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setShowStopLoggingConfirm(false)}
+                className="px-4 py-2 rounded text-[12px] font-['Chivo:Bold',_sans-serif] bg-gray-100 text-gray-700 hover:bg-gray-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setShowStopLoggingConfirm(false);
+                  setLoggingEnabled(false);
+                }}
+                className="px-4 py-2 rounded text-[12px] font-['Chivo:Bold',_sans-serif] bg-blue-600 text-white hover:bg-blue-700"
+              >
+                Yes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
