@@ -2309,9 +2309,17 @@ export default function App() {
   }, [scheduleDebouncedDiff]);
 
   const handleDrop = useCallback((item, dropTarget = null) => {
+    // Always assign a fresh unique ID so the same sidebar block can be
+    // dropped multiple times without ID collisions in the editor.
+    const freshId = item.source === 'sidebar' ? nextBlockId : (item.id || Date.now());
+    if (item.source === 'sidebar') {
+      setNextBlockId(prev => prev + 1);
+    }
+
     const newBlock = {
       ...item,
-      id: item.id || Date.now(),
+      id: freshId,
+      originalBlockId: item.source === 'sidebar' ? item.id : null,
       parentId: dropTarget?.type === 'child-zone' ? dropTarget.parentId : null,
       children: [],
       isDeveloped: false, // Add flag to check if this block has already been developed
@@ -2338,7 +2346,7 @@ export default function App() {
 
       return updated;
     });
-  }, [scheduleDebouncedDiff]);
+  }, [scheduleDebouncedDiff, nextBlockId]);
 
   const handleMove = useCallback((draggedItem, dropTarget) => {
     if (typeof draggedItem === 'number' && typeof dropTarget === 'number') {
@@ -2353,7 +2361,9 @@ export default function App() {
           logBlockMove({
             moveType: 'reorder-top-level',
             draggedBlockId: draggedBlock.id,
+            draggedOriginalBlockId: draggedBlock.originalBlockId ?? null,
             targetBlockId: targetBlock.id,
+            targetOriginalBlockId: targetBlock.originalBlockId ?? null,
             oldParentId: null,
             newParentId: null
           });
@@ -2389,7 +2399,9 @@ export default function App() {
         logBlockMove({
           moveType: oldParentId === null ? 'demote-to-child' : 'child-reassign',
           draggedBlockId: draggedBlock.id,
+          draggedOriginalBlockId: draggedBlock.originalBlockId ?? null,
           targetBlockId: dropTarget.parentId,
+          targetOriginalBlockId: newParent?.originalBlockId ?? null,
           oldParentId,
           newParentId: dropTarget.parentId
         });
@@ -2474,7 +2486,9 @@ export default function App() {
         logBlockMove({
           moveType,
           draggedBlockId: draggedBlock.id,
+          draggedOriginalBlockId: draggedBlock.originalBlockId ?? null,
           targetBlockId: targetBlock.id,
+          targetOriginalBlockId: targetBlock.originalBlockId ?? null,
           oldParentId,
           newParentId: draggedBlock.parentId || null
         });
@@ -2505,6 +2519,7 @@ export default function App() {
     // Create block immediately with placeholder title
     const newBlock = {
       id: blockId,
+      originalBlockId: null,
       title: 'Generating title...',
       summary: text,
       source: 'custom',
