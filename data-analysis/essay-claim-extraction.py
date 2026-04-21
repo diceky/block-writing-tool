@@ -1,4 +1,5 @@
 import os
+import sys
 import glob
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -44,13 +45,21 @@ def extract_claims(essay_content: str) -> str:
     return response.choices[0].message.content
 
 
-def process_essays():
-    """Process all essays in ./data/XX directories."""
+def process_essays(dir_nums=None):
+    """Process essays in ./data/XX directories.
+    
+    Args:
+        dir_nums: List of directory numbers to process (e.g., ['07', '08']).
+                  If None, processes all directories.
+    """
     data_dir = os.path.join(os.path.dirname(__file__), 'data')
 
-    # Find all numbered directories (01, 02, 03, ...)
-    dir_pattern = os.path.join(data_dir, '[0-9][0-9]')
-    directories = sorted(glob.glob(dir_pattern))
+    if dir_nums:
+        directories = [os.path.join(data_dir, d) for d in dir_nums]
+        directories = [d for d in directories if os.path.isdir(d)]
+    else:
+        dir_pattern = os.path.join(data_dir, '[0-9][0-9]')
+        directories = sorted(glob.glob(dir_pattern))
 
     if not directories:
         print("No directories found in ./data/")
@@ -91,4 +100,11 @@ def process_essays():
 
 
 if __name__ == "__main__":
-    process_essays()
+    # Specify directory numbers as command-line args, e.g.:
+    #   python essay-claim-extraction.py 07 08 09 11
+    # Or run with no args to process all directories.
+    if len(sys.argv) > 1:
+        dir_nums = [arg.zfill(2) for arg in sys.argv[1:]]
+    else:
+        dir_nums = None
+    process_essays(dir_nums)
