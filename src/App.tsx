@@ -1663,8 +1663,10 @@ const DevelopedTextPanel = React.forwardRef(function DevelopedTextPanel({ expand
   useEffect(() => {
     // Small delay to ensure DOM is updated
     setTimeout(() => {
+      const activeEl = document.activeElement;
       const textareas = document.querySelectorAll('.developed-text-textarea');
       textareas.forEach(textarea => {
+        if (textarea === activeEl) return; // user is typing here; onInput handles it
         textarea.style.height = 'auto';
         textarea.style.height = textarea.scrollHeight + 'px';
       });
@@ -1693,15 +1695,15 @@ const DevelopedTextPanel = React.forwardRef(function DevelopedTextPanel({ expand
               className={`developed-text-textarea flex-1 p-4 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 font-['Chivo:Regular',_sans-serif] text-[14px] leading-6 bg-white transition-all duration-300 overflow-hidden ${(isGenerating && !(item && item.toString().trim().length > 0)) ? 'blur-sm opacity-75' : ''}`}
               style={{
                 minHeight: '60px',
-                height: 'auto',
                 resize: 'none'
               }}
               placeholder={`Expanded text for block ${index + 1}...`}
               disabled={isGenerating}
               onInput={(e) => {
-                // Additional resize on input for real-time adjustment
+                const savedScrollY = window.scrollY;
                 e.target.style.height = 'auto';
                 e.target.style.height = e.target.scrollHeight + 'px';
+                window.scrollTo(0, savedScrollY);
               }}
             />
           </div>
