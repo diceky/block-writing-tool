@@ -1,6 +1,6 @@
-# Analysis
+# Analyzing Process-Level Data
 
-The purpose of this analysis is to see the user's re-reading and revision behaviour when writing an essay. Re-reading is measured through eye fixation time on corresponding blocks. For example when writingMode is "block", the eye fixation time on the TextEditor area v.s. DevelopedTextPanel allows us to infer the user's cognitive process through re-reading behaviours while writing. We use the [pymovements library](https://github.com/pymovements/pymovements) to detect fixation from the raw gaze data. Revision is measured through # of added/removed words in each mode, as well as the # of reordering that happens for "block" writing mode.
+The purpose of the process-level data analysis is to see the user's re-reading and revision behaviour when writing an essay. Re-reading is measured through eye fixation time on corresponding blocks. For example when writingMode is "block", the eye fixation time on the TextEditor area v.s. DevelopedTextPanel allows us to infer the user's cognitive process through re-reading behaviours while writing. We use the [pymovements library](https://github.com/pymovements/pymovements) to detect fixation from the raw gaze data. Revision is measured through # of added/removed words in each mode, as well as the # of reordering that happens for "block" writing mode.
 
 # About the data
 **sample-gaze.json**: this includes the eye gaze position of the users, in 60Hz. Top left of the screen is (0,0), bottom right is (1,1). NaN is given when the gaze was outside of the screen or untracked. The positions are sometimes outside of 0-1, which also means it was outside of the screen. Each line is in JSON format, but the entire file is missing the wrapper brackets, as well as commas for each line.
