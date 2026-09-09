@@ -15,6 +15,7 @@
 - **Backend**: Netlify Functions
 - **AI Provider**: OpenAI GPT-4o models
 - **Drag & Drop**: React DnD
+- **Word difference count**: Diff Match and Patch library
 - **Deployment**: Netlify
 
 ## API Functions
