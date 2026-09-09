@@ -143,8 +143,6 @@ Format your response exactly like this:
   }
 ]
 
-Topic: "${topic}"
-
 Generate exactly 8 blocks with specific, actionable guidance for someone writing about this topic. Focus on logical flow and comprehensive coverage. ENSURE the JSON array is complete and properly formatted.`;
 
   try {
@@ -321,8 +319,6 @@ Format your response exactly like this:
     "summary": "Provide background information and establish why you're writing this communication."
   }
 ]
-
-Topic: "${topic}"
 
 Generate exactly 8 blocks with specific, actionable guidance for someone writing about this topic. Focus on logical flow and comprehensive coverage. ENSURE the JSON array is complete and properly formatted.`;
 
@@ -561,12 +557,37 @@ async function testOpenAIConnection() {
   }
 }
 
+// Format the full block outline (parents + children) as plain text context
+function formatBlockStructure(blocks) {
+  if (!Array.isArray(blocks) || blocks.length === 0) return '';
+  const parents = blocks.filter(b => b && (b.parentId === null || b.parentId === undefined));
+  const lines = [];
+  parents.forEach((parent, i) => {
+    const pTitle = (parent.title || '').toString().trim() || 'Untitled';
+    const pSummary = (parent.summary || '').toString().trim();
+    lines.push(`${i + 1}. ${pTitle}: ${pSummary}`);
+    const children = blocks.filter(b => b && b.parentId === parent.id);
+    children.forEach((child, j) => {
+      const cTitle = (child.title || '').toString().trim() || 'Untitled';
+      const cSummary = (child.summary || '').toString().trim();
+      lines.push(`   ${i + 1}.${j + 1} ${cTitle}: ${cSummary}`);
+    });
+  });
+  return lines.join('\n');
+}
+
 async function expandTextWithOpenAI(blocks, topic, existingExpandedTextArray = [], onProgress) {
   // Get parent blocks for expansion
   const parentBlocks = blocks.filter(block => 
     block && (block.parentId === null || block.parentId === undefined)
   );
-  
+
+  // Full outline of all blocks, shared across every per-block prompt for coherence
+  const outlineStructure = formatBlockStructure(blocks);
+  const outlineSection = outlineStructure
+    ? `\n\nOverall outline structure (for context — do not rewrite other blocks):\n${outlineStructure}`
+    : '';
+
   const expandedParagraphs = [];
   // Iterate with index to map to existing expanded text array
   for (let i = 0; i < parentBlocks.length; i++) {
@@ -585,13 +606,13 @@ async function expandTextWithOpenAI(blocks, topic, existingExpandedTextArray = [
         ? (existingExpandedTextArray[i] || '')
         : '';
       const referenceTextSection = currentExpandedText && currentExpandedText.trim()
-        ? `\n\nFor reference, this is the current developed text for this block (if any):\n${currentExpandedText.trim()}`
+        ? `\n\nFor reference, this is the current developed text for this block:\n${currentExpandedText.trim()}`
         : '';
 
       const prompt = `You are a clear and concise writer. 
 
-Your goal is to write text that sounds natural to read out loud, using simple and direct language while staying polished and credible. 
-Your task is to expand the following outline into a cohesive paragraph.
+Your goal is to write text that sounds natural to read out loud, using simple, polished and credible language.
+Your task is to expand the following draft point into a cohesive paragraph.
 
 Topic sentence: ${parent.summary}
 Supporting points: ${children.map(child => `- ${child.summary}`).join('\n')}
@@ -600,10 +621,12 @@ ${referenceTextSection}
 
 Instructions:
 - Create a ${allContent.length * 1.5} sentence paragraph
-- Start with the topic sentence, then expand each supporting point into 1-2 sentences
+- Open up the paragraph with the topic sentence, then expand each supporting point into 1-2 sentences
 - Use plain, everyday English (aim for clarity, not elegance)
 - Make it flow as one natural paragraph
-- Stay consistent with the topic: ${topic}
+- Stay consistent with the overall outline structure provided below, and make sure this paragraph fits the surrounding outline.
+
+${outlineSection}
 
 Respond with only the expanded paragraph, no additional commentary or formatting.`;
       
@@ -647,7 +670,7 @@ Respond with only the expanded paragraph, no additional commentary or formatting
       const currentExpandedText = Array.isArray(existingExpandedTextArray)
         ? (existingExpandedTextArray[i] || '')
         : '';
-      const expansion = await regenerateSingleBlockExpansion(parent, topic, currentExpandedText);
+      const expansion = await regenerateSingleBlockExpansion(parent, topic, currentExpandedText, outlineStructure);
       expandedParagraphs.push(expansion);
       if (typeof onProgress === 'function') {
         try { onProgress(i, expansion); } catch {}
@@ -660,21 +683,27 @@ Respond with only the expanded paragraph, no additional commentary or formatting
 
 // Regenerate expansion for a single block
 // Optionally include the current expanded text for this block as reference
-async function regenerateSingleBlockExpansion(block, topic, currentExpandedText = '') {
+async function regenerateSingleBlockExpansion(block, topic, currentExpandedText = '', outlineStructure = '') {
 
   // Create a prompt for expanding just one block
 
   const referenceSection = currentExpandedText && currentExpandedText.trim()
-    ? `\n\nFor reference, this is the current text developed for this block (if any)::\n${currentExpandedText.trim()}`
+    ? `\n\nFor reference, this is the current text developed for this block:\n${currentExpandedText.trim()}`
     : '';
 
-  const prompt = `You are a clear and concise writer. Your goal is to write text that sounds natural to read out loud, using simple and direct language while staying polished and credible. Your task is to expand the following outline point into 1–2 natural, readable sentences.
+  const outlineSection = outlineStructure && outlineStructure.trim()
+    ? `\n\nOverall outline structure (for context — do not rewrite other blocks):\n${outlineStructure.trim()}`
+    : '';
+
+  const prompt = `You are a clear and concise writer. 
+  Your goal is to write text that sounds natural to read out loud, using simple, polished and credible language.
+  Your task is to expand the following draft point into 1–2 natural, readable sentences.
 
 Each expansion should:
 - Transform the basic point into professional, business language that is easy to read
 - Stay consistent and coherent to the overall topic of the writing, which is ${topic}
 
-Outline point to expand:
+Draft point to expand:
 ${block.summary}
 
 ${referenceSection}
@@ -683,10 +712,10 @@ Instructions:
 - Use plain, everyday English (aim for clarity, not elegance)
 - Write 1-2 concise sentences for this point
 - Avoid fancy words, fillers, jargon, buzzwords, or overly complex phrasing
-- Only include real evidence, data, or statistics **if the user explicitly asks for actual examples or numbers** in the outline point
+- **If the user explicitly asks for actual examples or numbers** in the outline point, use the search function to provide existing evidence, data, or statistics. Do NOT fabricate or guess data.
 - When you do include data or evidence, use **credible and verifiable sources** (e.g. government reports, major research studies, or reputable organizations) and **cite the source URL clearly in parentheses (e.g. data shows XXX (https://sample-url.com)**
-- Do NOT fabricate or guess data
-- Make sure that the text is coherent with the topic, which is ${topic}
+- Stay consistent with the overall outline structure provided below, and make sure this paragraph fits the surrounding outline.
+${outlineSection}
 
 Respond with only the expanded text, no additional commentary or formatting.`;
 
@@ -2722,24 +2751,32 @@ export default function App() {
         const expandedTextIndexRef = parentBlocksForIndex.findIndex(block => block.id === parentBlockForRegeneration.id);
         const currentExpandedTextForParent = expandedTextIndexRef !== -1 ? (expandedTextArray[expandedTextIndexRef] || '') : '';
         const referenceSection = currentExpandedTextForParent && currentExpandedTextForParent.trim()
-          ? `\n\nFor reference, this is the current developed text for this block (if any):\n${currentExpandedTextForParent.trim()}`
+          ? `\n\nFor reference, this is the current developed text for this block:\n${currentExpandedTextForParent.trim()}`
           : '';
 
-        const prompt = `You are a clear and concise writer. Your goal is to write text that sounds natural to read out loud, using simple and direct language while staying polished and credible. Your task is to expand the following outline into a cohesive paragraph.
+        const outlineStructure = formatBlockStructure(droppedBlocks);
+        const outlineSection = outlineStructure
+          ? `\n\nOverall outline structure (for context — do not rewrite other blocks):\n${outlineStructure}`
+          : '';
 
-Topic sentence: ${parentBlockForRegeneration.summary}
-Supporting points: ${childBlocksForRegeneration.map(child => `- ${child.summary}`).join('\n')}
-
-      ${referenceSection}
-
-Instructions:
-- Create a ${allContent.length * 1.5} sentence paragraph
-- Start with the topic sentence, then expand each supporting point into 1-2 sentences
-- Use plain, everyday English (aim for clarity, not elegance)
-- Make it flow as one natural paragraph
-- Stay consistent with the topic: ${currentTopic}
-
-Respond with only the expanded paragraph, no additional commentary or formatting.`;
+        const prompt = `You are a clear and concise writer. 
+        Your goal is to write text that sounds natural to read out loud, using simple, polished and credible language.
+        Your task is to expand the following draft point into a cohesive paragraph.
+        
+        Topic sentence: ${parentBlockForRegeneration.summary}
+        Supporting points: ${childBlocksForRegeneration.map(child => `- ${child.summary}`).join('\n')}
+        
+        ${referenceSection}
+        
+        Instructions:
+        - Create a ${allContent.length * 1.5} sentence paragraph
+        - Start with the topic sentence, then expand each supporting point into 1-2 sentences
+        - Use plain, everyday English (aim for clarity, not elegance)
+        - Make it flow as one natural paragraph
+        - Stay consistent with the overall outline structure provided below, and make sure this paragraph fits the surrounding outline.
+        ${outlineSection}
+        
+        Respond with only the expanded paragraph, no additional commentary or formatting.`;
 
         const response = await fetch('/.netlify/functions/chat-completions', {
           method: 'POST',
@@ -2774,7 +2811,8 @@ Respond with only the expanded paragraph, no additional commentary or formatting
         );
         const expandedTextIndexRef = parentBlocksForIndex.findIndex(block => block.id === blockToRegenerate.id);
         const currentExpandedText = expandedTextIndexRef !== -1 ? (expandedTextArray[expandedTextIndexRef] || '') : '';
-        newExpansion = await regenerateSingleBlockExpansion(blockToRegenerate, currentTopic, currentExpandedText);
+        const outlineStructure = formatBlockStructure(droppedBlocks);
+        newExpansion = await regenerateSingleBlockExpansion(blockToRegenerate, currentTopic, currentExpandedText, outlineStructure);
       }
 
       // Find the correct position in expandedTextArray
