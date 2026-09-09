@@ -13,7 +13,7 @@
 
 - **Frontend**: React + Vite + Tailwind CSS
 - **Backend**: Netlify Functions
-- **AI Provider**: OpenAI GPT-4o models
+- **AI Provider**: OpenAI GPT-4o / GPT-5 models
 - **Drag & Drop**: React DnD
 - **Word difference count**: Diff Match and Patch library
 - **Deployment**: Netlify

@@ -45,8 +45,8 @@ exports.handler = async (event) => {
             max_tokens: maxTokens,
         };
 
-        // For gpt-4o-search-preview: add web_search_options and remove temperature
-        if (model === 'gpt-4o-search-preview') {
+        // Search-enabled models require web_search_options and reject temperature
+        if (model === 'gpt-4o-search-preview' || model === 'gpt-5-search-api') {
             requestBody["web_search_options"] = {};
             delete requestBody.temperature;
         }
@@ -61,6 +61,18 @@ exports.handler = async (event) => {
         });
 
         if (!response.ok) {
+            // Capture OpenAI's raw response body so the client can see the real reason
+            const rawBody = await response.text();
+            let openaiError = null;
+            try { openaiError = JSON.parse(rawBody); } catch { openaiError = null; }
+
+            console.error('OpenAI API error', {
+                status: response.status,
+                statusText: response.statusText,
+                model: requestBody.model,
+                body: rawBody,
+            });
+
             let errorMessage;
             if (response.status === 401) {
                 errorMessage = 'Invalid OpenAI API key. Please check your API key and try again.';
@@ -71,12 +83,17 @@ exports.handler = async (event) => {
             } else if (response.status === 500) {
                 errorMessage = 'OpenAI API server error. Please try again later.';
             } else {
-                errorMessage = `OpenAI API error: ${response.status} ${response.statusText}`;
+                const detail = openaiError?.error?.message || openaiError?.error || rawBody;
+                errorMessage = `OpenAI API error: ${response.status} ${response.statusText}${detail ? ` — ${detail}` : ''}`;
             }
 
             return {
                 statusCode: response.status,
-                body: JSON.stringify({ error: errorMessage })
+                body: JSON.stringify({
+                    error: errorMessage,
+                    openai: openaiError,
+                    raw: rawBody,
+                })
             };
         }
 

@@ -636,7 +636,7 @@ Respond with only the expanded paragraph, no additional commentary or formatting
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: 'gpt-4o-search-preview',
+          model: 'gpt-5-search-api',
           prompt: prompt,
           maxTokens: 2000,
           temperature: 0.7
@@ -644,13 +644,20 @@ Respond with only the expanded paragraph, no additional commentary or formatting
       });
 
       if (!response.ok) {
-        try {
-          const errorData = await response.json();
-          throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
-        } catch (_) {
-          const errorText = await response.text();
-          throw new Error(errorText || `HTTP error! status: ${response.status}`);
-        }
+        const rawBody = await response.text();
+        console.error('[expandTextWithOpenAI] API error', {
+          status: response.status,
+          statusText: response.statusText,
+          body: rawBody,
+          promptPreview: prompt.slice(0, 500),
+        });
+        let parsedError;
+        try { parsedError = JSON.parse(rawBody); } catch { parsedError = null; }
+        throw new Error(
+          (parsedError && (parsedError.error?.message || parsedError.error || parsedError.message)) ||
+          rawBody ||
+          `HTTP error! status: ${response.status}`
+        );
       }
 
       const data = await response.json();
@@ -726,7 +733,7 @@ Respond with only the expanded text, no additional commentary or formatting.`;
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'gpt-4o-search-preview',
+        model: 'gpt-5-search-api',
         prompt: prompt,
         maxTokens: 2000,
         temperature: 0.7
@@ -734,8 +741,21 @@ Respond with only the expanded text, no additional commentary or formatting.`;
     });
 
     if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      const rawBody = await response.text();
+      console.error('[regenerateSingleBlockExpansion] API error', {
+        status: response.status,
+        statusText: response.statusText,
+        body: rawBody,
+        blockSummary: block?.summary,
+        promptPreview: prompt.slice(0, 500),
+      });
+      let parsedError;
+      try { parsedError = JSON.parse(rawBody); } catch { parsedError = null; }
+      throw new Error(
+        (parsedError && (parsedError.error?.message || parsedError.error || parsedError.message)) ||
+        rawBody ||
+        `HTTP error! status: ${response.status}`
+      );
     }
 
     const data = await response.json();
@@ -2784,7 +2804,7 @@ export default function App() {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            model: 'gpt-4o-search-preview',
+            model: 'gpt-5-search-api',
             prompt: prompt,
             maxTokens: 2000,
             temperature: 0.7
@@ -2792,8 +2812,21 @@ export default function App() {
         });
 
         if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+          const rawBody = await response.text();
+          console.error('[handleRegenerateBlock] API error', {
+            status: response.status,
+            statusText: response.statusText,
+            body: rawBody,
+            parentSummary: parentBlockForRegeneration?.summary,
+            promptPreview: prompt.slice(0, 500),
+          });
+          let parsedError;
+          try { parsedError = JSON.parse(rawBody); } catch { parsedError = null; }
+          throw new Error(
+            (parsedError && (parsedError.error?.message || parsedError.error || parsedError.message)) ||
+            rawBody ||
+            `HTTP error! status: ${response.status}`
+          );
         }
 
         const data = await response.json();
