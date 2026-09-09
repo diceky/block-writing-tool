@@ -2863,13 +2863,13 @@ Respond with only the expanded paragraph, no additional commentary or formatting
     <>
     <DndProvider backend={HTML5Backend}>
       <div className="bg-[#ffffff] relative rounded-[20px] size-full">
-        <div className="overflow-auto relative size-full p-20">
+        <div className="overflow-auto relative size-full app-container">
           {/* Header */}
-          <div className="flex items-center justify-between mb-8">
-            <div className="font-['Chivo:Bold',_sans-serif] not-italic text-[#000000] text-left text-[32px] mb-4">
+          <div className="app-header mb-8">
+            <div className="app-header-title font-['Chivo:Bold',_sans-serif] not-italic text-[#000000] text-left">
               <p className="block leading-[normal]">Let's prototype your writing</p>
             </div>
-            <div className="flex items-center gap-4">
+            <div className="app-header-controls flex flex-wrap items-center gap-2">
               {/* Writing Mode Selector */}
               <div className="flex gap-2 bg-gray-100 rounded-lg p-1">
                 <button
@@ -3080,8 +3080,8 @@ Respond with only the expanded paragraph, no additional commentary or formatting
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-8">
-                <div>
+              <div className="block-mode-grid">
+                <div className="min-w-0">
                   <h4 className="font-['Chivo:Bold',_sans-serif] text-[14px] text-[#000000] mb-3">
                     Your Writing Draft
                   </h4>
@@ -3107,7 +3107,7 @@ Respond with only the expanded paragraph, no additional commentary or formatting
                   />
                 </div>
 
-                <div>
+                <div className="min-w-0">
                   <div className="flex justify-between items-center mb-3">
                     <h4 className="font-['Chivo:Bold',_sans-serif] text-[14px] text-[#000000]">
                       Developed Text
